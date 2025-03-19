@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIP Worker Demo</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .log-container {
+      background-color: #f5f5f5;
+      border: 1px solid #ddd;
+      padding: 10px;
+      height: 300px;
+      overflow-y: auto;
+      margin-top: 20px;
+      font-family: monospace;
+    }
+    .control-panel {
+      margin-bottom: 20px;
+    }
+    button {
+      margin-right: 10px;
+      padding: 8px 12px;
+    }
+  </style>
+</head>
+<body>
+  <h1>SIP Worker Demo</h1>
+  
+  <div class="control-panel">
+    <button id="connectWorker">Connect to Worker</button>
+    <button id="pingWorker" disabled>Ping Worker</button>
+  </div>
+  
+  <h2>Log:</h2>
+  <div id="logContainer" class="log-container"></div>
+
+  <script type="module" src="./index.ts"></script>
+</body>
+</html> 

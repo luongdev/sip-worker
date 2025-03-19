@@ -1,0 +1,27 @@
+{
+  "name": "sip-worker",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build:prod": "vite build --config vite.client.config.ts --mode production && vite build --config vite.worker.config.ts --mode production",
+    "build:dev": "vite build --config vite.client.config.ts --mode development && vite build --config vite.worker.config.ts --mode development",
+    "build:demo": "vite build --config vite.demo.config.ts",
+    "preview": "vite preview"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "description": "",
+  "dependencies": {
+    "sip.js": "^0.21.2"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.24",
+    "cross-env": "^7.0.3",
+    "rimraf": "^5.0.5",
+    "terser": "^5.39.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.8"
+  }
+}

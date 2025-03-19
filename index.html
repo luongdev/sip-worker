@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SIP Worker</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      max-width: 800px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    .demo-link {
+      display: inline-block;
+      margin-top: 20px;
+      padding: 8px 16px;
+      background-color: #0077cc;
+      color: white;
+      text-decoration: none;
+      border-radius: 4px;
+    }
+    .demo-link:hover {
+      background-color: #005fa3;
+    }
+  </style>
+</head>
+<body>
+  <h1>SIP Worker Demo</h1>
+  <p>Đây là demo cho dự án SIP Worker, sử dụng SharedWorker để quản lý kết nối SIP và gọi điện qua WebRTC.</p>
+  
+  <a href="/src/demo/" class="demo-link">Mở Ứng Dụng Demo</a>
+  
+  <h2>Phiên bản</h2>
+  <p>Phiên bản hiện tại: <span id="version">__VERSION__</span></p>
+  <p>Môi trường: <span id="env">__PROD__ ? 'production' : 'development'</span></p>
+  
+  <script>
+    // Hiển thị version và env từ các biến đã được định nghĩa
+    document.getElementById('version').textContent = __VERSION__;
+    document.getElementById('env').textContent = __PROD__ ? 'production' : 'development';
+  </script>
+</body>
+</html> 
