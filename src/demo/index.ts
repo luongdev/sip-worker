@@ -1,11 +1,17 @@
-import { Message } from "../common/types";
 import { SipClient } from "../client/sip-client";
+import { LoggerFactory } from "../logger";
+import { CallState } from "../common/types";
+
+// Tạo logger cho demo
+const logger = LoggerFactory.getInstance().getLogger("Demo");
 
 // DOM Elements
 const connectButton = document.getElementById(
   "connectWorker"
 ) as HTMLButtonElement;
-const pingButton = document.getElementById("pingWorker") as HTMLButtonElement;
+const requestButton = document.getElementById(
+  "requestWorker"
+) as HTMLButtonElement;
 const disconnectButton = document.getElementById(
   "disconnectWorker"
 ) as HTMLButtonElement;
@@ -27,6 +33,7 @@ function log(message: string) {
   logEntry.textContent = `[${new Date().toISOString()}] ${message}`;
   logContainer.appendChild(logEntry);
   logContainer.scrollTop = logContainer.scrollHeight;
+  logger.info(message);
 }
 
 // Update UI connection status
@@ -42,8 +49,14 @@ function updateConnectionStatus(connected: boolean, clientCount: number = 0) {
 
   // Update buttons
   connectButton.disabled = connected;
-  pingButton.disabled = !connected;
+  requestButton.disabled = !connected;
   disconnectButton.disabled = !connected;
+}
+
+// Interfaces cho demo
+interface ClientEvent {
+  clientId: string;
+  totalClients: number;
 }
 
 // Connect button handler
@@ -52,16 +65,20 @@ connectButton.addEventListener("click", async () => {
     log("Connecting to SharedWorker...");
     sipClient = new SipClient();
 
-    // Setup message handler
-    sipClient.onMessage = (message: Message) => {
-      if (message.type === "CLIENT_CONNECTED") {
-        log(`New client connected: ${message.clientId}`);
-        updateConnectionStatus(true, message.totalClients);
-      } else if (message.type === "CLIENT_DISCONNECTED") {
-        log(`Client disconnected: ${message.clientId}`);
-        updateConnectionStatus(true, message.totalClients);
-      }
-    };
+    // Setup event handlers
+    sipClient.on("stateUpdate", (state: CallState) => {
+      log(`State updated: ${JSON.stringify(state)}`);
+    });
+    
+    sipClient.on("clientConnected", (data: ClientEvent) => {
+      log(`New client connected: ${data.clientId}`);
+      updateConnectionStatus(true, data.totalClients);
+    });
+    
+    sipClient.on("clientDisconnected", (data: ClientEvent) => {
+      log(`Client disconnected: ${data.clientId}`);
+      updateConnectionStatus(true, data.totalClients);
+    });
 
     // Initialize connection
     const result = await sipClient.initialize();
@@ -80,22 +97,31 @@ connectButton.addEventListener("click", async () => {
   }
 });
 
-// Ping button handler
-pingButton.addEventListener("click", async () => {
+// Request button handler
+requestButton.addEventListener("click", async () => {
   if (!sipClient) {
     log("SIP Client not initialized");
     return;
   }
 
   try {
-    log("Sending PING to worker...");
+    log("Sending request to worker...");
     const startTime = performance.now();
-    await sipClient.ping();
+    
+    // Sử dụng method request để gọi lên worker
+    const result = await sipClient.request<{count: number, clients: string[]}>('getConnectedClients');
+    
     const endTime = performance.now();
-    log(`Received PONG. Round-trip time: ${Math.round(endTime - startTime)}ms`);
+    log(`Received response. Round-trip time: ${Math.round(endTime - startTime)}ms`);
+    log(`Connected clients: ${result.count}`);
+    log(`Client IDs: ${result.clients.join(", ")}`);
+    
+    // Echo test
+    const echoResult = await sipClient.request<{message: string}>('echo', { message: "Hello Worker!" });
+    log(`Echo response: ${JSON.stringify(echoResult)}`);
   } catch (error) {
     log(
-      `Ping error: ${error instanceof Error ? error.message : String(error)}`
+      `Request error: ${error instanceof Error ? error.message : String(error)}`
     );
   }
 });
@@ -117,4 +143,4 @@ disconnectButton.addEventListener("click", () => {
 });
 
 // Initialize UI
-updateConnectionStatus(false);
+updateConnectionStatus(false); 

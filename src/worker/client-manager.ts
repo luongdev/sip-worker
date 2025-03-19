@@ -1,17 +1,21 @@
 import { WorkerMessage, IClientManager } from "./types";
+import { LoggerFactory } from "../logger";
+
+// Tạo logger cho ClientManager
+const logger = LoggerFactory.getInstance().getLogger("ClientManager");
 
 export class ClientManager implements IClientManager {
   private readonly clients = new Map<string, MessagePort>();
 
   registerClient(clientId: string, port: MessagePort): void {
     this.clients.set(clientId, port);
-    console.log(`Client connected: ${clientId}`);
+    logger.info(`Client connected: ${clientId}`);
   }
 
   unregisterClient(clientId: string): void {
     if (this.hasClient(clientId)) {
       this.clients.delete(clientId);
-      console.log(`Client disconnected: ${clientId}`);
+      logger.info(`Client disconnected: ${clientId}`);
     }
   }
 
@@ -35,7 +39,7 @@ export class ClientManager implements IClientManager {
       port.postMessage(message);
       return true;
     } catch (error) {
-      console.error(`Failed to send message to client ${clientId}:`, error);
+      logger.error(`Failed to send message to client ${clientId}:`, error);
       return false;
     }
   }
@@ -45,7 +49,7 @@ export class ClientManager implements IClientManager {
       try {
         port.postMessage(message);
       } catch (error) {
-        console.error(`Failed to broadcast to client ${clientId}:`, error);
+        logger.error(`Failed to broadcast to client ${clientId}:`, error);
       }
     });
   }
@@ -53,4 +57,31 @@ export class ClientManager implements IClientManager {
   getAllClientIds(): string[] {
     return Array.from(this.clients.keys());
   }
-}
+
+  // Request/Response handling
+  sendResponse(clientId: string, requestId: string, data: any, success: boolean = true): boolean {
+    return this.sendToClient(clientId, {
+      type: "RESPONSE",
+      payload: {
+        requestId,
+        success,
+        data
+      },
+      timestamp: Date.now()
+    });
+  }
+
+  sendErrorResponse(clientId: string, requestId: string, error: string | Error): boolean {
+    const errorMessage = error instanceof Error ? error.message : error;
+    
+    return this.sendToClient(clientId, {
+      type: "RESPONSE",
+      payload: {
+        requestId,
+        success: false,
+        error: errorMessage
+      },
+      timestamp: Date.now()
+    });
+  }
+} 

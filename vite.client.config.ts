@@ -36,10 +36,10 @@ export default defineConfig(({ mode }) => {
           }
         : undefined,
       lib: {
-        entry: resolve(__dirname, "src/client/index.ts"),
+        entry: resolve(__dirname, "src/index.ts"),
         name: "SipClient",
         formats: ["es", "iife"],
-        fileName(format, entryName) {
+        fileName(format) {
           return `sip-worker.${format}.js`;
         },
       },
