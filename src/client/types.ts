@@ -3,7 +3,8 @@ import {
   MessageHandlerCallback,
   InitializeResult,
   CallData,
-  CallState
+  CallState,
+  SipConfig
 } from "../common/types";
 
 export interface ClientMessage extends Message {
@@ -34,6 +35,11 @@ export interface ISipClient {
   // Kiểm tra trạng thái
   getClientId(): string;
   isConnected(): boolean;
+  
+  // Phương thức SIP
+  initializeSip(config: SipConfig): Promise<boolean>;
+  connectSip(): Promise<boolean>;
+  registerSip(): Promise<boolean>;
   
   // Quản lý cuộc gọi
   makeCall(target: string, options?: CallOptions): boolean;

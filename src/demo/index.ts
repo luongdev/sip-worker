@@ -1,6 +1,6 @@
 import { SipClient } from "../client/sip-client";
 import { LoggerFactory } from "../logger";
-import { CallState } from "../common/types";
+import { CallState, SipConfig } from "../common/types";
 
 // Tạo logger cho demo
 const logger = LoggerFactory.getInstance().getLogger("Demo");
@@ -23,6 +23,22 @@ const statusText = document.getElementById("statusText") as HTMLSpanElement;
 const clientCountElement = document.getElementById(
   "clientCount"
 ) as HTMLSpanElement;
+
+// SIP Config Elements
+const sipUriInput = document.getElementById("sipUri") as HTMLInputElement;
+const sipPasswordInput = document.getElementById("sipPassword") as HTMLInputElement;
+const sipWsServersInput = document.getElementById("sipWsServers") as HTMLTextAreaElement;
+const sipExpiresInput = document.getElementById("sipExpires") as HTMLInputElement;
+
+// SIP Status Elements
+const sipInitStatus = document.getElementById("sipInitStatus") as HTMLDivElement;
+const sipConnectStatus = document.getElementById("sipConnectStatus") as HTMLDivElement;
+const sipRegisterStatus = document.getElementById("sipRegisterStatus") as HTMLDivElement;
+
+// SIP Action Buttons
+const initSipButton = document.getElementById("initSip") as HTMLButtonElement;
+const connectSipButton = document.getElementById("connectSip") as HTMLButtonElement;
+const registerSipButton = document.getElementById("registerSip") as HTMLButtonElement;
 
 // SIP Client instance
 let sipClient: SipClient | null = null;
@@ -51,6 +67,22 @@ function updateConnectionStatus(connected: boolean, clientCount: number = 0) {
   connectButton.disabled = connected;
   requestButton.disabled = !connected;
   disconnectButton.disabled = !connected;
+  
+  // Enable/disable SIP initialization button
+  initSipButton.disabled = !connected;
+}
+
+// Update SIP status
+function updateSipStatus(initialized: boolean, connected: boolean, registered: boolean) {
+  // Update status indicators
+  sipInitStatus.className = initialized ? "status connected" : "status disconnected";
+  sipConnectStatus.className = connected ? "status connected" : "status disconnected";
+  sipRegisterStatus.className = registered ? "status connected" : "status disconnected";
+  
+  // Update buttons
+  initSipButton.disabled = !sipClient?.isConnected() || initialized;
+  connectSipButton.disabled = !initialized || connected;
+  registerSipButton.disabled = !connected || registered;
 }
 
 // Interfaces cho demo
@@ -79,6 +111,22 @@ connectButton.addEventListener("click", async () => {
       log(`Client disconnected: ${data.clientId}`);
       updateConnectionStatus(true, data.totalClients);
     });
+    
+    // SIP event handlers
+    sipClient.on("sipInitResult", (data: any) => {
+      log(`SIP initialization result: ${JSON.stringify(data)}`);
+      updateSipStatus(data.success, false, false);
+    });
+    
+    sipClient.on("sipConnectionUpdate", (data: any) => {
+      log(`SIP connection update: ${JSON.stringify(data)}`);
+      updateSipStatus(true, data.state === "connected", false);
+    });
+    
+    sipClient.on("sipRegistrationUpdate", (data: any) => {
+      log(`SIP registration update: ${JSON.stringify(data)}`);
+      updateSipStatus(true, true, data.state === "registered");
+    });
 
     // Initialize connection
     const result = await sipClient.initialize();
@@ -87,6 +135,7 @@ connectButton.addEventListener("click", async () => {
 
     // Update UI
     updateConnectionStatus(true, result.connectedClients);
+    updateSipStatus(false, false, false);
   } catch (error) {
     log(
       `Connection error: ${
@@ -94,6 +143,7 @@ connectButton.addEventListener("click", async () => {
       }`
     );
     updateConnectionStatus(false);
+    updateSipStatus(false, false, false);
   }
 });
 
@@ -139,8 +189,114 @@ disconnectButton.addEventListener("click", () => {
 
   // Update UI
   updateConnectionStatus(false);
+  updateSipStatus(false, false, false);
   log("Disconnected from worker");
 });
 
+// Initialize SIP button handler
+initSipButton.addEventListener("click", async () => {
+  if (!sipClient) {
+    log("SIP Client not initialized");
+    return;
+  }
+  
+  try {
+    // Validate inputs
+    const uri = sipUriInput.value.trim();
+    const password = sipPasswordInput.value.trim();
+    const wsServersText = sipWsServersInput.value.trim();
+    const expires = parseInt(sipExpiresInput.value.trim(), 10);
+    
+    if (!uri) {
+      log("Error: SIP URI is required");
+      return;
+    }
+    
+    if (!password) {
+      log("Error: SIP password is required");
+      return;
+    }
+    
+    if (!wsServersText) {
+      log("Error: At least one WebSocket server is required");
+      return;
+    }
+    
+    // Parse WebSocket servers
+    const wsServers = wsServersText
+      .split("\n")
+      .map(line => line.trim())
+      .filter(line => line.length > 0);
+    
+    if (wsServers.length === 0) {
+      log("Error: At least one WebSocket server is required");
+      return;
+    }
+    
+    // Create SIP configuration
+    const sipConfig: SipConfig = {
+      uri,
+      password,
+      wsServers,
+      registerExpires: expires,
+      enableLogs: true
+    };
+    
+    log(`Initializing SIP with config: ${JSON.stringify(sipConfig, null, 2)}`);
+    
+    // Initialize SIP
+    const result = await sipClient.initializeSip(sipConfig);
+    log(`SIP initialization ${result ? "successful" : "failed"}`);
+    
+    // UI will be updated by the event handler
+  } catch (error) {
+    log(`SIP initialization error: ${error instanceof Error ? error.message : String(error)}`);
+    updateSipStatus(false, false, false);
+  }
+});
+
+// Connect SIP button handler
+connectSipButton.addEventListener("click", async () => {
+  if (!sipClient) {
+    log("SIP Client not initialized");
+    return;
+  }
+  
+  try {
+    log("Connecting to SIP server...");
+    
+    // Connect to SIP
+    const result = await sipClient.connectSip();
+    log(`SIP connection ${result ? "successful" : "failed"}`);
+    
+    // UI will be updated by the event handler
+  } catch (error) {
+    log(`SIP connection error: ${error instanceof Error ? error.message : String(error)}`);
+    updateSipStatus(true, false, false);
+  }
+});
+
+// Register SIP button handler
+registerSipButton.addEventListener("click", async () => {
+  if (!sipClient) {
+    log("SIP Client not initialized");
+    return;
+  }
+  
+  try {
+    log("Registering with SIP server...");
+    
+    // Register with SIP
+    const result = await sipClient.registerSip();
+    log(`SIP registration ${result ? "successful" : "failed"}`);
+    
+    // UI will be updated by the event handler
+  } catch (error) {
+    log(`SIP registration error: ${error instanceof Error ? error.message : String(error)}`);
+    updateSipStatus(true, true, false);
+  }
+});
+
 // Initialize UI
-updateConnectionStatus(false); 
+updateConnectionStatus(false);
+updateSipStatus(false, false, false); 

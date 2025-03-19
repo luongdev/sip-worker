@@ -19,7 +19,92 @@ export type MessageType =
   | "CUSTOM_EVENT"
   | "POLL_DATA_UPDATED"
   | "REQUEST"
-  | "RESPONSE";
+  | "RESPONSE"
+  | "REQUEST_SIP_INIT"
+  | "SIP_INIT_RESULT"
+  | "REQUEST_CONNECT"
+  | "REQUEST_REGISTER"
+  | "SIP_CONNECTION_UPDATE"
+  | "SIP_REGISTRATION_UPDATE";
+
+/**
+ * Cấu hình SIP
+ */
+export interface SipConfig {
+  /**
+   * URI cho SIP, ví dụ: 'sip:username@domain.com'
+   */
+  uri: string;
+  
+  /**
+   * Mật khẩu cho tài khoản SIP
+   */
+  password: string;
+  
+  /**
+   * Tên hiển thị (tùy chọn)
+   */
+  displayName?: string;
+  
+  /**
+   * Danh sách các máy chủ WebSocket SIP
+   */
+  wsServers: string | string[];
+  
+  /**
+   * Chuỗi User-Agent (tùy chọn)
+   */
+  userAgentString?: string;
+  
+  /**
+   * Thời gian hết hạn đăng ký (giây)
+   */
+  registerExpires?: number;
+  
+  /**
+   * Tự động đăng ký
+   */
+  autoRegister?: boolean;
+  
+  /**
+   * Thời gian hết hạn của session timers
+   */
+  sessionTimersExpires?: number;
+  
+  /**
+   * Thời gian chờ ICE gathering (ms)
+   */
+  iceGatheringTimeout?: number;
+  
+  /**
+   * Danh sách máy chủ STUN
+   */
+  stunServers?: string[];
+  
+  /**
+   * Danh sách các máy chủ TURN
+   */
+  turnServers?: Array<{
+    urls: string | string[];
+    username?: string;
+    password?: string;
+  }>;
+  
+  /**
+   * Danh sách các máy chủ outbound proxy (tùy chọn)
+   */
+  outboundProxy?: string[];
+  
+  /**
+   * Headers bổ sung (tùy chọn)
+   */
+  extraHeaders?: Record<string, string>;
+  
+  /**
+   * Logs bật/tắt
+   */
+  enableLogs?: boolean;
+}
 
 // Interface cơ bản cho tin nhắn
 export interface Message {
