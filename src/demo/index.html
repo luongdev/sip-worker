@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SIP Worker Demo</title>
+  <title>SIP SharedWorker Demo</title>
   <style>
     body {
       font-family: Arial, sans-serif;
@@ -11,35 +11,71 @@
       margin: 0 auto;
       padding: 20px;
     }
+    
+    .control-panel, .status-panel {
+      margin-bottom: 20px;
+      padding: 15px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    
+    .status {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      margin-right: 5px;
+    }
+    
+    .connected {
+      background-color: green;
+    }
+    
+    .disconnected {
+      background-color: red;
+    }
+    
     .log-container {
-      background-color: #f5f5f5;
-      border: 1px solid #ddd;
-      padding: 10px;
       height: 300px;
       overflow-y: auto;
-      margin-top: 20px;
+      border: 1px solid #ccc;
+      padding: 10px;
       font-family: monospace;
+      background-color: #f5f5f5;
     }
-    .control-panel {
-      margin-bottom: 20px;
-    }
+    
     button {
-      margin-right: 10px;
-      padding: 8px 12px;
+      margin-right: 5px;
+      padding: 8px 15px;
     }
   </style>
 </head>
 <body>
-  <h1>SIP Worker Demo</h1>
+  <h1>SIP SharedWorker Demo</h1>
   
   <div class="control-panel">
-    <button id="connectWorker">Connect to Worker</button>
-    <button id="pingWorker" disabled>Ping Worker</button>
+    <h2>Controls</h2>
+    <button id="connectWorker">Connect</button>
+    <button id="pingWorker" disabled>Ping</button>
+    <button id="disconnectWorker" disabled>Disconnect</button>
   </div>
   
-  <h2>Log:</h2>
+  <div class="status-panel">
+    <h2>Status</h2>
+    <div>
+      <strong>Connection:</strong> 
+      <span id="connectionStatus" class="status disconnected"></span>
+      <span id="statusText">Disconnected</span>
+    </div>
+    <div>
+      <strong>Connected Clients:</strong> 
+      <span id="clientCount">0</span>
+    </div>
+  </div>
+  
+  <h2>Log</h2>
   <div id="logContainer" class="log-container"></div>
-
+  
   <script type="module" src="./index.ts"></script>
 </body>
 </html> 

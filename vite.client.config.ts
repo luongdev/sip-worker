@@ -38,14 +38,16 @@ export default defineConfig(({ mode }) => {
       lib: {
         entry: resolve(__dirname, "src/client/index.ts"),
         name: "SipClient",
-        fileName: "sip-client",
+        formats: ["es", "iife"],
+        fileName(format, entryName) {
+          return `sip-worker.${format}.js`;
+        },
       },
       rollupOptions: {
         output: {
           globals: {
             "sip.js": "SIP",
           },
-          format: ["es"],
         },
         // Loại trừ thư mục demo khỏi quá trình build
         external: [/src\/demo\/.*/, "sip.js"],
