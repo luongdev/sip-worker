@@ -7,6 +7,7 @@ import {
 } from "../common/types";
 import { ISipClient, SipClientOptions, ClientMessage } from "./types";
 import { LoggerFactory } from "../logger";
+import { PeerConnectionManager } from "./peer-connection-manager";
 
 // Tạo logger cho SipClient
 const logger = LoggerFactory.getInstance().getLogger("SipClient");
@@ -43,9 +44,13 @@ export class SipClient implements ISipClient {
   private sipConnected: boolean = false;
   private sipRegistered: boolean = false;
 
+  // WebRTC handler
+  private peerConnectionManager: PeerConnectionManager;
+
   constructor(options?: SipClientOptions) {
     this.clientId = `client_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
     this.options = { ...DefaultClientOptions, ...options };
+    this.peerConnectionManager = new PeerConnectionManager(this);
   }
 
   // Event handling
@@ -407,48 +412,7 @@ export class SipClient implements ISipClient {
   }
 
   /**
-   * Mengirim nada DTMF selama panggilan
-   * @param callId ID panggilan yang aktif
-   * @param tones Nada DTMF untuk dikirim
-   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
-   */
-  sendDtmf(callId: string, tones: string): Promise<any> {
-    if (!this.isConnected()) {
-      return Promise.reject(new Error("Not connected to worker"));
-    }
-
-    logger.info(`Sending DTMF tones ${tones} for call ${callId}`);
-
-    return this.request("sendDtmf", {
-      callId,
-      tones,
-    });
-  }
-
-  /**
-   * Mengatur status mute panggilan
-   * @param callId ID panggilan
-   * @param muted Status mute (true/false)
-   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
-   */
-  setMuted(callId: string, muted: boolean): Promise<any> {
-    if (!this.isConnected()) {
-      return Promise.reject(new Error("Not connected to worker"));
-    }
-
-    logger.info(`Setting muted=${muted} for call ${callId}`);
-
-    return this.request("setMuted", {
-      callId,
-      muted,
-    });
-  }
-
-  /**
-   * Menjawab panggilan masuk
-   * @param callId ID panggilan yang akan dijawab
-   * @param options Opsi tambahan untuk menjawab panggilan
-   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
+   * Trả lời cuộc gọi đến
    */
   answerCall(callId: string, options?: any): Promise<any> {
     if (!this.isConnected()) {
@@ -468,6 +432,56 @@ export class SipClient implements ISipClient {
     return this.request("answerCall", {
       callId,
       options,
+    });
+  }
+
+  /**
+   * Gửi tín hiệu DTMF
+   */
+  sendDtmf(callId: string, tones: string): Promise<any> {
+    return new Promise((resolve, reject) => {
+      try {
+        const result = this.peerConnectionManager.sendDtmf(tones);
+
+        // Gửi thông báo đến worker
+        this.sendMessage({
+          type: MessageType.MEDIA_CONTROL,
+          payload: {
+            callId,
+            action: "dtmf",
+            tones,
+          },
+        });
+
+        resolve({ success: result });
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }
+
+  /**
+   * Đặt trạng thái tắt tiếng
+   */
+  setMuted(callId: string, muted: boolean): Promise<any> {
+    return new Promise((resolve, reject) => {
+      try {
+        const result = this.peerConnectionManager.setMuted(muted);
+
+        // Gửi yêu cầu đến worker
+        this.sendMessage({
+          type: MessageType.MEDIA_CONTROL,
+          payload: {
+            callId,
+            action: "mute",
+            muted,
+          },
+        });
+
+        resolve({ success: result });
+      } catch (error) {
+        reject(error);
+      }
     });
   }
 
@@ -504,141 +518,159 @@ export class SipClient implements ISipClient {
 
   // Xử lý messages từ worker
   private handleWorkerMessage(event: MessageEvent): void {
-    const message = event.data as Message;
+    const { data } = event;
 
-    if (!message || !message.type) {
-      logger.error("Received invalid message from worker:", event.data);
+    // Bỏ qua tin nhắn không hợp lệ
+    if (!data || !data.type) {
       return;
     }
 
-    logger.debug(`Received message from worker: ${message.type}`);
+    // Ghi log tin nhắn nhận được từ worker
+    logger.debug(`Received message from worker: ${data.type}`);
 
-    switch (message.type) {
-      case "STATE_UPDATE":
-        // Khởi tạo hoàn tất
-        const initPending = this.pendingRequests.get("initialize");
-        if (initPending) {
-          initPending.resolve({
-            success: true,
-            clientId: this.clientId,
-            connectedClients: message.payload?.totalClients || 1,
-          });
-          this.pendingRequests.delete("initialize");
-        }
-
-        // Emit event
-        this.emitEvent("stateUpdate", message.payload);
-        break;
-
-      case "RESPONSE":
-        this.handleResponse(message as ResponseMessage);
-        break;
-
-      case "SIP_INIT_RESULT":
-        // Xử lý kết quả khởi tạo SIP
-        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_init_"
-        for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith("sip_init_")) {
-            logger.debug(`Found pending SIP init request: ${key}`);
-            if (message.payload?.success) {
-              pending.resolve(message.payload);
-            } else {
-              pending.reject(
-                new Error(message.payload?.error || "SIP initialization failed")
-              );
-            }
-            this.pendingRequests.delete(key);
-            break;
+    try {
+      switch (data.type) {
+        case "STATE_UPDATE":
+          // Khởi tạo hoàn tất
+          const initPending = this.pendingRequests.get("initialize");
+          if (initPending) {
+            initPending.resolve({
+              success: true,
+              clientId: this.clientId,
+              connectedClients: data.payload?.totalClients || 1,
+            });
+            this.pendingRequests.delete("initialize");
           }
-        }
 
-        // Emit event
-        this.emitEvent("sipInitResult", message.payload);
-        break;
+          // Emit event
+          this.emitEvent("stateUpdate", data.payload);
+          break;
 
-      case "SIP_CONNECTION_UPDATE":
-        // Xử lý kết quả kết nối SIP
-        logger.debug(
-          `Nhận được SIP_CONNECTION_UPDATE với payload: ${JSON.stringify(
-            message.payload
-          )}`
-        );
+        case "RESPONSE":
+          this.handleResponse(data as ResponseMessage);
+          break;
 
-        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_connect_"
-        for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith("sip_connect_")) {
-            logger.debug(`Found pending SIP connect request: ${key}`);
-
-            // Chỉ resolve nếu là trạng thái "connected" hoặc có success=true
-            if (
-              message.payload?.state === "connected" ||
-              message.payload?.success === true
-            ) {
-              logger.debug(`Kết nối SIP thành công, giải quyết promise`);
-              this.sipConnected = true;
-              pending.resolve(message.payload);
+        case "SIP_INIT_RESULT":
+          // Xử lý kết quả khởi tạo SIP
+          // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_init_"
+          for (const [key, pending] of this.pendingRequests.entries()) {
+            if (key.startsWith("sip_init_")) {
+              logger.debug(`Found pending SIP init request: ${key}`);
+              if (data.payload?.success) {
+                pending.resolve(data.payload);
+              } else {
+                pending.reject(
+                  new Error(data.payload?.error || "SIP initialization failed")
+                );
+              }
               this.pendingRequests.delete(key);
               break;
             }
-            // Reject nếu là trạng thái "failed" hoặc có lỗi
-            else if (
-              message.payload?.state === "failed" ||
-              message.payload?.error
-            ) {
-              logger.debug(`Kết nối SIP thất bại, từ chối promise`);
-              this.sipConnected = false;
-              pending.reject(
-                new Error(message.payload?.error || "SIP connection failed")
-              );
+          }
+
+          // Emit event
+          this.emitEvent("sipInitResult", data.payload);
+          break;
+
+        case "SIP_CONNECTION_UPDATE":
+          // Xử lý kết quả kết nối SIP
+          logger.debug(
+            `Nhận được SIP_CONNECTION_UPDATE với payload: ${JSON.stringify(
+              data.payload
+            )}`
+          );
+
+          // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_connect_"
+          for (const [key, pending] of this.pendingRequests.entries()) {
+            if (key.startsWith("sip_connect_")) {
+              logger.debug(`Found pending SIP connect request: ${key}`);
+
+              // Chỉ resolve nếu là trạng thái "connected" hoặc có success=true
+              if (
+                data.payload?.state === "connected" ||
+                data.payload?.success === true
+              ) {
+                logger.debug(`Kết nối SIP thành công, giải quyết promise`);
+                this.sipConnected = true;
+                pending.resolve(data.payload);
+                this.pendingRequests.delete(key);
+                break;
+              }
+              // Reject nếu là trạng thái "failed" hoặc có lỗi
+              else if (
+                data.payload?.state === "failed" ||
+                data.payload?.error
+              ) {
+                logger.debug(`Kết nối SIP thất bại, từ chối promise`);
+                this.sipConnected = false;
+                pending.reject(
+                  new Error(data.payload?.error || "SIP connection failed")
+                );
+                this.pendingRequests.delete(key);
+                break;
+              }
+              // Nếu là trạng thái "connecting", không làm gì cả, chờ tin nhắn tiếp theo
+              else if (data.payload?.state === "connecting") {
+                logger.debug(`Đang kết nối SIP, chờ tin nhắn tiếp theo`);
+                // KHÔNG xóa pending request và KHÔNG resolve/reject
+              }
+            }
+          }
+
+          // Emit event
+          this.emitEvent("sipConnectionUpdate", data.payload);
+          break;
+
+        case "SIP_REGISTRATION_UPDATE":
+          // Xử lý kết quả đăng ký SIP
+          // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_register_"
+          for (const [key, pending] of this.pendingRequests.entries()) {
+            if (key.startsWith("sip_register_")) {
+              logger.debug(`Found pending SIP register request: ${key}`);
+              if (
+                data.payload?.state === "registered" ||
+                data.payload?.success
+              ) {
+                this.sipRegistered = true;
+                pending.resolve(data.payload);
+              } else if (
+                data.payload?.state === "failed" ||
+                data.payload?.error
+              ) {
+                this.sipRegistered = false;
+                pending.reject(
+                  new Error(data.payload?.error || "SIP registration failed")
+                );
+              }
               this.pendingRequests.delete(key);
               break;
             }
-            // Nếu là trạng thái "connecting", không làm gì cả, chờ tin nhắn tiếp theo
-            else if (message.payload?.state === "connecting") {
-              logger.debug(`Đang kết nối SIP, chờ tin nhắn tiếp theo`);
-              // KHÔNG xóa pending request và KHÔNG resolve/reject
-            }
           }
-        }
 
-        // Emit event
-        this.emitEvent("sipConnectionUpdate", message.payload);
-        break;
+          // Emit event
+          this.emitEvent("sipRegistrationUpdate", data.payload);
+          break;
 
-      case "SIP_REGISTRATION_UPDATE":
-        // Xử lý kết quả đăng ký SIP
-        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_register_"
-        for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith("sip_register_")) {
-            logger.debug(`Found pending SIP register request: ${key}`);
-            if (
-              message.payload?.state === "registered" ||
-              message.payload?.success
-            ) {
-              this.sipRegistered = true;
-              pending.resolve(message.payload);
-            } else if (
-              message.payload?.state === "failed" ||
-              message.payload?.error
-            ) {
-              this.sipRegistered = false;
-              pending.reject(
-                new Error(message.payload?.error || "SIP registration failed")
-              );
-            }
-            this.pendingRequests.delete(key);
-            break;
-          }
-        }
+        // Xử lý các tin nhắn liên quan đến WebRTC
+        case MessageType.SDP_REQUEST:
+          logger.debug(`Handling SDP request: ${JSON.stringify(data.payload)}`);
+          this.handleSdpRequest(data.payload);
+          break;
 
-        // Emit event
-        this.emitEvent("sipRegistrationUpdate", message.payload);
-        break;
+        case MessageType.ICE_CANDIDATE:
+          logger.debug(
+            `Handling ICE candidate: ${JSON.stringify(data.payload)}`
+          );
+          this.handleAddIceCandidate(data.payload);
+          break;
 
-      default:
-        // Emit event using the message type as event name
-        this.emitEvent("message", message);
-        break;
+        default:
+          // Emit event using the message type as event name
+          this.emitEvent("message", data);
+          break;
+      }
+    } catch (error) {
+      logger.error("Error handling worker message:", error);
     }
   }
 
@@ -673,5 +705,117 @@ export class SipClient implements ISipClient {
     } else {
       logger.warn(`Received response for unknown request: ${requestId}`);
     }
+  }
+
+  // Phương thức xử lý WebRTC
+  /**
+   * Lấy PeerConnectionManager instance
+   */
+  getPeerConnectionManager(): PeerConnectionManager {
+    return this.peerConnectionManager;
+  }
+
+  /**
+   * Xử lý yêu cầu SDP từ worker
+   */
+  private async handleSdpRequest(payload: any): Promise<void> {
+    try {
+      const result = await this.peerConnectionManager.handleSdpRequest(payload);
+
+      // Gửi kết quả về worker
+      this.sendMessage({
+        type: MessageType.SDP_RESPONSE,
+        payload: {
+          requestId: payload.requestId,
+          result,
+        },
+      });
+    } catch (error) {
+      // Gửi lỗi về worker
+      this.sendMessage({
+        type: MessageType.SDP_RESPONSE,
+        payload: {
+          requestId: payload.requestId,
+          error: {
+            message: error instanceof Error ? error.message : String(error),
+            name: error instanceof Error ? error.name : "Error",
+          },
+        },
+      });
+    }
+  }
+
+  /**
+   * Xử lý yêu cầu thêm ICE candidate
+   */
+  private async handleAddIceCandidate(payload: any): Promise<void> {
+    try {
+      await this.peerConnectionManager.addIceCandidate(payload.candidateData);
+
+      // Gửi kết quả về worker nếu có requestId
+      if (payload.requestId) {
+        this.sendMessage({
+          type: MessageType.SDP_RESPONSE,
+          payload: {
+            requestId: payload.requestId,
+            result: { success: true },
+          },
+        });
+      }
+    } catch (error) {
+      logger.error("Error adding ICE candidate:", error);
+
+      // Gửi lỗi về worker nếu có requestId
+      if (payload.requestId) {
+        this.sendMessage({
+          type: MessageType.SDP_RESPONSE,
+          payload: {
+            requestId: payload.requestId,
+            error: {
+              message: error instanceof Error ? error.message : String(error),
+              name: error instanceof Error ? error.name : "Error",
+            },
+          },
+        });
+      }
+    }
+  }
+
+  /**
+   * Khởi tạo media stream cho cuộc gọi
+   */
+  async setupCallMedia(
+    callId: string,
+    options: { video?: boolean } = {}
+  ): Promise<MediaStream> {
+    const constraints: MediaStreamConstraints = {
+      audio: true,
+      video: options.video || false,
+    };
+
+    return this.peerConnectionManager.setLocalStream(constraints);
+  }
+
+  // Các phương thức xử lý media
+
+  /**
+   * Lấy remote media stream
+   */
+  getRemoteStream(): MediaStream | null {
+    return this.peerConnectionManager.getRemoteStream();
+  }
+
+  /**
+   * Lấy local media stream
+   */
+  getLocalStream(): MediaStream | null {
+    return this.peerConnectionManager.getLocalStream();
+  }
+
+  /**
+   * Đóng kết nối media
+   */
+  closeMedia(): void {
+    this.peerConnectionManager.close();
   }
 }

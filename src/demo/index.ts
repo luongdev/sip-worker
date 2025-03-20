@@ -203,33 +203,8 @@ connectButton.addEventListener("click", async () => {
             handleSipState(payload);
             break;
 
-          case MessageType.SDP_REQUEST:
-            // Xử lý các yêu cầu SDP
-            logger.info(
-              `Received SDP_REQUEST with payload: ${JSON.stringify(
-                payload,
-                null,
-                2
-              )}`
-            );
-            handleSdpRequest(payload);
-            break;
-
-          case MessageType.ICE_CANDIDATE:
-            // Xử lý ICE candidate
-            logger.debug(
-              `Received ICE_CANDIDATE: ${JSON.stringify(payload, null, 2)}`
-            );
-            if (payload && payload.candidate) {
-              handleAddIceCandidate({
-                requestId: payload.requestId,
-                candidateData: payload.candidate,
-              });
-            }
-            break;
-
           default:
-            // Gửi event đến các handlers đã đăng ký
+            // Không xử lý các tin nhắn WebRTC ở đây nữa vì đã được xử lý trong SipClient
             logger.debug(`Unhandled message type: ${type}`);
             break;
         }
@@ -440,75 +415,18 @@ registerSipButton.addEventListener("click", async () => {
   }
 });
 
-// Khởi tạo peer connection với các ice servers từ cấu hình
-function initializePeerConnection(iceServers: RTCIceServer[]) {
-  // Đảm bảo đóng kết nối cũ nếu có
-  if (peerConnection) {
-    peerConnection.close();
+// Hàm khởi tạo PeerConnection không còn cần thiết nữa vì đã có PeerConnectionManager
+// Thay đổi initializePeerConnection thành getOrInitializePeerConnection
+function getOrInitializePeerConnection(
+  iceServers: RTCIceServer[] = []
+): RTCPeerConnection | null {
+  if (!sipClient) {
+    logger.error("SipClient not initialized");
+    return null;
   }
 
-  // Tạo peer connection mới
-  peerConnection = new RTCPeerConnection({
-    iceServers:
-      iceServers.length > 0
-        ? iceServers
-        : [{ urls: "stun:stun.l.google.com:19302" }],
-  });
-
-  // Thiết lập các handlers
-  peerConnection.onicecandidate = (event) => {
-    if (event.candidate) {
-      // Gửi ice candidate đến worker khi được tạo
-      const candidateData = {
-        candidate: event.candidate.candidate,
-        sdpMid: event.candidate.sdpMid,
-        sdpMLineIndex: event.candidate.sdpMLineIndex,
-        usernameFragment: event.candidate.usernameFragment,
-      };
-
-      sipClient?.sendMessage({
-        type: MessageType.ICE_CANDIDATE,
-        payload: {
-          candidate: candidateData,
-        },
-      });
-
-      log(`ICE candidate sent: ${candidateData.candidate}`);
-    } else {
-      log("ICE gathering complete");
-    }
-  };
-
-  peerConnection.ontrack = (event) => {
-    log(`Remote track received: ${event.track.kind}`);
-
-    // Kết nối remote audio track với audio element
-    if (event.track.kind === "audio" && event.streams && event.streams[0]) {
-      const remoteAudio = document.getElementById(
-        "remoteAudio"
-      ) as HTMLAudioElement;
-      if (remoteAudio) {
-        remoteAudio.srcObject = event.streams[0];
-        log("Remote audio connected to audio element");
-      }
-    }
-  };
-
-  peerConnection.oniceconnectionstatechange = () => {
-    log(`ICE connection state changed: ${peerConnection?.iceConnectionState}`);
-
-    // Gửi thông báo về trạng thái kết nối ICE
-    sipClient?.sendMessage({
-      type: MessageType.CONNECTION_STATE_CHANGE,
-      payload: {
-        state: peerConnection?.iceConnectionState,
-        type: "ice",
-      },
-    });
-  };
-
-  // Thêm các event listeners khác
-  return peerConnection;
+  // Sử dụng PeerConnectionManager từ SipClient
+  return sipClient.getPeerConnectionManager().initialize(iceServers);
 }
 
 // Xử lý trạng thái cuộc gọi
@@ -562,6 +480,27 @@ function handleCallState(payload: any) {
         if (!callStartTime) {
           callStartTime = Date.now();
           startCallDurationTimer();
+        }
+
+        // Khi cuộc gọi đã kết nối, hiển thị luồng video/audio từ đối phương
+        if (payload.state === "connected" && sipClient) {
+          log("Call connected, getting remote stream");
+
+          // Sử dụng phương thức getRemoteStream từ SipClient
+          const remoteStream = sipClient.getRemoteStream();
+          if (remoteStream) {
+            const remoteAudio = document.getElementById(
+              "remoteAudio"
+            ) as HTMLAudioElement;
+            if (remoteAudio) {
+              remoteAudio.srcObject = remoteStream;
+              remoteAudio
+                .play()
+                .catch((e) => console.error("Error playing remote audio:", e));
+            }
+          } else {
+            log("No remote stream available");
+          }
         }
         break;
 
@@ -632,8 +571,25 @@ makeCallButton.addEventListener("click", async () => {
   }
 
   try {
-    log(`Initiating call to ${target}...`);
+    log(`Calling ${target}...`);
     makeCallButton.disabled = true;
+
+    // Lấy luồng âm thanh/video trước khi gọi
+    if (sipClient) {
+      log("Getting user media...");
+      // Sử dụng phương thức setupCallMedia từ SipClient thay vì trực tiếp lấy getUserMedia
+      localStream = await sipClient.setupCallMedia(activeCallId || "", {
+        video: false,
+      });
+
+      // Cập nhật UI với luồng local
+      const localAudio = document.getElementById(
+        "localAudio"
+      ) as HTMLAudioElement;
+      if (localAudio) {
+        localAudio.srcObject = localStream;
+      }
+    }
 
     const result = await sipClient.makeCall(target);
     log(`Call initiated: ${JSON.stringify(result)}`);
@@ -698,13 +654,19 @@ muteButton.addEventListener("click", async () => {
   }
 
   try {
-    isMuted = !isMuted;
-    log(`${isMuted ? "Muting" : "Unmuting"} call ${activeCallId}...`);
+    if (!sipClient || !activeCallId) {
+      log("No active call to mute/unmute");
+      return;
+    }
 
-    await sipClient.setMuted(activeCallId, isMuted);
-    muteButton.textContent = isMuted ? "Unmute" : "Mute";
+    // Đảo ngược trạng thái tắt tiếng hiện tại
+    isMuted = !isMuted;
+
+    // Cập nhật trạng thái tắt tiếng sử dụng SipClient.setMuted
+    const result = await sipClient.setMuted(activeCallId, isMuted);
 
     log(`Call ${isMuted ? "muted" : "unmuted"}`);
+    muteButton.textContent = isMuted ? "Unmute" : "Mute";
   } catch (error) {
     log(
       `Mute/unmute error: ${
@@ -728,12 +690,10 @@ sendDtmfButton.addEventListener("click", async () => {
   }
 
   try {
-    log(`Sending DTMF tones ${tones} to call ${activeCallId}...`);
-
+    // Gửi tín hiệu DTMF sử dụng SipClient.sendDtmf
     await sipClient.sendDtmf(activeCallId, tones);
-    log(`DTMF tones ${tones} sent`);
 
-    // Xóa input sau khi gửi
+    log(`Sent DTMF tones: ${tones}`);
     dtmfInput.value = "";
   } catch (error) {
     log(
@@ -746,234 +706,6 @@ sendDtmfButton.addEventListener("click", async () => {
 function handleSipState(payload: any) {
   log(`SIP state update: ${JSON.stringify(payload)}`);
   // TODO: Cập nhật UI hiển thị trạng thái SIP
-}
-
-// Hàm xử lý SDP request từ worker
-async function handleSdpRequest(payload: any) {
-  try {
-    // Đảm bảo payload và request tồn tại
-    if (!payload || !payload.request) {
-      logger.error("Invalid SDP payload, missing request:", payload);
-      return;
-    }
-
-    const { requestId, operation, options, data } = payload.request;
-
-    logger.debug(`Received SDP request: ${operation}, requestId: ${requestId}`);
-
-    // Đảm bảo đã có peer connection
-    if (!peerConnection) {
-      logger.info("Initializing new PeerConnection for SDP request");
-      peerConnection = initializePeerConnection([]);
-    }
-
-    log(`Processing SDP request: ${operation}`);
-
-    // Xử lý dựa trên loại operation
-    let result: any;
-    switch (operation) {
-      case "createOffer":
-        // Lấy luồng audio từ microphone
-        if (!localStream) {
-          logger.info("Acquiring local media stream for createOffer");
-          try {
-            localStream = await navigator.mediaDevices.getUserMedia({
-              audio: true,
-              video: false,
-            });
-
-            // Thêm tracks vào peer connection
-            localStream.getTracks().forEach((track) => {
-              if (peerConnection) {
-                logger.debug(`Adding ${track.kind} track to PeerConnection`);
-                peerConnection.addTrack(track, localStream!);
-              }
-            });
-
-            log("Local audio stream acquired and added to peer connection");
-          } catch (error) {
-            logger.error("Error acquiring media stream:", error);
-            throw new Error(
-              `Failed to acquire media: ${
-                error instanceof Error ? error.message : String(error)
-              }`
-            );
-          }
-        }
-
-        // Tạo offer
-        if (peerConnection) {
-          logger.debug("Creating SDP offer with options:", options);
-          const offer = await peerConnection.createOffer(options);
-          await peerConnection.setLocalDescription(offer);
-
-          result = {
-            type: offer.type,
-            sdp: offer.sdp,
-          };
-          logger.debug("SDP offer created successfully");
-        } else {
-          throw new Error("PeerConnection is null");
-        }
-        break;
-
-      case "createAnswer":
-        // Tạo answer
-        if (peerConnection) {
-          logger.debug("Creating SDP answer with options:", options);
-          const answer = await peerConnection.createAnswer(options);
-          await peerConnection.setLocalDescription(answer);
-
-          result = {
-            type: answer.type,
-            sdp: answer.sdp,
-          };
-          logger.debug("SDP answer created successfully");
-        } else {
-          throw new Error("PeerConnection is null");
-        }
-        break;
-
-      case "setLocalDescription":
-        // Set local description
-        if (peerConnection) {
-          logger.debug("Setting local description");
-          await peerConnection.setLocalDescription(
-            new RTCSessionDescription(data)
-          );
-          result = { success: true };
-        } else {
-          throw new Error("PeerConnection is null");
-        }
-        break;
-
-      case "setRemoteDescription":
-        // Set remote description
-        if (peerConnection) {
-          logger.debug("Setting remote description");
-          await peerConnection.setRemoteDescription(
-            new RTCSessionDescription(data)
-          );
-          result = { success: true };
-        } else {
-          throw new Error("PeerConnection is null");
-        }
-        break;
-
-      case "getCompleteSdp":
-        // Lấy SDP đầy đủ với ice candidates
-        if (peerConnection) {
-          result = {
-            sdp: peerConnection.localDescription?.sdp || "",
-          };
-        } else {
-          throw new Error("PeerConnection is null");
-        }
-        break;
-
-      case "close":
-        // Đóng peer connection
-        if (peerConnection) {
-          peerConnection.close();
-          peerConnection = null;
-        }
-
-        // Dừng các luồng nếu có
-        if (localStream) {
-          localStream.getTracks().forEach((track) => track.stop());
-          localStream = null;
-        }
-
-        result = { success: true };
-        break;
-
-      default:
-        throw new Error(`Unknown SDP operation: ${operation}`);
-    }
-
-    // Phản hồi kết quả
-    logger.debug(
-      `Sending SDP response for ${operation}, requestId: ${requestId}`
-    );
-    sipClient?.sendMessage({
-      type: MessageType.SDP_RESPONSE,
-      payload: {
-        requestId,
-        result,
-      },
-    });
-
-    log(`SDP response sent for ${operation}`);
-  } catch (error) {
-    let requestId = payload?.request?.requestId;
-    logger.error(
-      `Error handling SDP request: ${
-        error instanceof Error ? error.message : String(error)
-      }, requestId: ${requestId}`
-    );
-
-    // Phản hồi lỗi
-    if (requestId) {
-      sipClient?.sendMessage({
-        type: MessageType.SDP_RESPONSE,
-        payload: {
-          requestId,
-          error: error instanceof Error ? error.message : String(error),
-        },
-      });
-      log(`SDP error response sent for requestId: ${requestId}`);
-    } else {
-      log(`Could not send SDP error response: missing requestId`);
-    }
-  }
-}
-
-// Hàm xử lý thêm ICE candidate
-async function handleAddIceCandidate(payload: any) {
-  try {
-    const { requestId, candidateData } = payload;
-
-    if (!peerConnection) {
-      throw new Error("PeerConnection not initialized");
-    }
-
-    // Tạo RTCIceCandidate từ dữ liệu
-    const candidate = new RTCIceCandidate({
-      candidate: candidateData.candidate,
-      sdpMid: candidateData.sdpMid,
-      sdpMLineIndex: candidateData.sdpMLineIndex,
-      usernameFragment: candidateData.usernameFragment,
-    });
-
-    // Thêm candidate vào peer connection
-    await peerConnection.addIceCandidate(candidate);
-
-    log(`ICE candidate added: ${candidateData.candidate}`);
-
-    // Phản hồi thành công
-    sipClient?.sendMessage({
-      type: MessageType.SDP_RESPONSE,
-      payload: {
-        requestId,
-        result: { success: true },
-      },
-    });
-  } catch (error) {
-    log(
-      `Error adding ICE candidate: ${
-        error instanceof Error ? error.message : String(error)
-      }`
-    );
-
-    // Phản hồi lỗi
-    sipClient?.sendMessage({
-      type: MessageType.SDP_RESPONSE,
-      payload: {
-        requestId: payload.requestId,
-        error: error instanceof Error ? error.message : String(error),
-      },
-    });
-  }
 }
 
 // Initialize UI
