@@ -1,5 +1,6 @@
 import { WorkerMessage, IClientManager } from "./types";
 import { LoggerFactory } from "../logger";
+import { MessageType } from "../common/types";
 
 // Tạo logger cho ClientManager
 const logger = LoggerFactory.getInstance().getLogger("ClientManager");
@@ -59,29 +60,38 @@ export class ClientManager implements IClientManager {
   }
 
   // Request/Response handling
-  sendResponse(clientId: string, requestId: string, data: any, success: boolean = true): boolean {
+  sendResponse(
+    clientId: string,
+    requestId: string,
+    data: any,
+    success: boolean = true
+  ): boolean {
     return this.sendToClient(clientId, {
-      type: "RESPONSE",
+      type: MessageType.RESPONSE,
       payload: {
         requestId,
         success,
-        data
+        data,
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
   }
 
-  sendErrorResponse(clientId: string, requestId: string, error: string | Error): boolean {
+  sendErrorResponse(
+    clientId: string,
+    requestId: string,
+    error: string | Error
+  ): boolean {
     const errorMessage = error instanceof Error ? error.message : error;
-    
+
     return this.sendToClient(clientId, {
-      type: "RESPONSE",
+      type: MessageType.RESPONSE,
       payload: {
         requestId,
         success: false,
-        error: errorMessage
+        error: errorMessage,
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
   }
-} 
+}

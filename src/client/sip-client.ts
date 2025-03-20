@@ -23,12 +23,12 @@ export const DefaultClientOptions: SipClientOptions = {
 export class SipClient implements ISipClient {
   private worker?: SharedWorker;
   private port?: MessagePort;
-  private _eventHandlers: Map<string, Set<Function>> = new Map();
+  private connected: boolean = false;
 
   private readonly clientId: string;
   private readonly options: SipClientOptions;
-  private connected: boolean = false;
-  private pendingRequests: Map<
+  private readonly eventHandlers: Map<string, Set<Function>> = new Map();
+  private readonly pendingRequests: Map<
     string,
     {
       resolve: Function;
@@ -50,24 +50,24 @@ export class SipClient implements ISipClient {
 
   // Event handling
   on(event: string, handler: Function): void {
-    if (!this._eventHandlers.has(event)) {
-      this._eventHandlers.set(event, new Set());
+    if (!this.eventHandlers.has(event)) {
+      this.eventHandlers.set(event, new Set());
     }
-    this._eventHandlers.get(event)?.add(handler);
+    this.eventHandlers.get(event)?.add(handler);
   }
 
   off(event: string, handler: Function): void {
-    const handlers = this._eventHandlers.get(event);
+    const handlers = this.eventHandlers.get(event);
     if (handlers) {
       handlers.delete(handler);
       if (handlers.size === 0) {
-        this._eventHandlers.delete(event);
+        this.eventHandlers.delete(event);
       }
     }
   }
 
   private emitEvent(event: string, ...args: any[]): void {
-    const handlers = this._eventHandlers.get(event);
+    const handlers = this.eventHandlers.get(event);
     if (handlers) {
       handlers.forEach((handler) => {
         try {
@@ -107,7 +107,7 @@ export class SipClient implements ISipClient {
         // Bắt đầu lắng nghe và gửi thông tin khởi tạo
         this.port.start();
         this.port.postMessage({
-          type: "CLIENT_CONNECTED",
+          type: MessageType.CLIENT_CONNECTED,
           clientId: this.clientId,
           timestamp: Date.now(),
         });
@@ -163,11 +163,7 @@ export class SipClient implements ISipClient {
   }
 
   // Request/Response
-  request<T = any>(
-    action: string,
-    payload?: any,
-    timeout: number = 5000
-  ): Promise<T> {
+  request<T = any>(action: string, payload?: any, timeout = 5000): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.connected || !this.port) {
         reject(new Error("Not connected to worker"));
@@ -485,7 +481,7 @@ export class SipClient implements ISipClient {
         });
 
         // Đóng các request đang chờ
-        this.pendingRequests.forEach((pending, key) => {
+        this.pendingRequests.forEach((pending) => {
           if (pending.timeoutId) {
             clearTimeout(pending.timeoutId);
           }

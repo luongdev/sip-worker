@@ -7,16 +7,12 @@ import {
   RegistererState,
   TransportState,
   URI,
-  Core,
 } from "sip.js";
 import { LoggerFactory } from "../logger";
 import { SipConfig } from "../common/types";
 import { Message, MessageType } from "../common/types";
 import { IClientManager } from "./types";
-import {
-  WorkerSessionDescriptionHandlerFactory,
-  IceCandidate,
-} from "./worker-sdh";
+import { WorkerSessionDescriptionHandlerFactory } from "./worker-sdh";
 
 // Mở rộng interface SipConfig cho các thuộc tính mới
 interface ExtendedSipConfig extends SipConfig {
@@ -85,19 +81,12 @@ export class SipManager {
    */
   private _createURI(uriString: string): URI {
     try {
-      // Tạo từng thành phần của URI thủ công
-      if (!uriString.startsWith("sip:")) {
+      const uri = UserAgent.makeURI(uriString);
+      if (!uri) {
         throw new Error("URI must start with 'sip:'");
       }
 
-      // Phân tích URI cơ bản
-      const parts = uriString.substring(4).split("@");
-      if (parts.length !== 2) {
-        throw new Error("Invalid SIP URI format");
-      }
-
-      // Tạo URI từ thủ công từ các thành phần
-      return new URI("sip", parts[0], parts[1]);
+      return uri;
     } catch (error) {
       logger.error(`Error creating URI from ${uriString}:`, error);
       throw new Error(`Invalid SIP URI: ${uriString}`);
@@ -121,11 +110,9 @@ export class SipManager {
     this.config = config;
 
     try {
-      // Nếu không cần WebRTC, tạo một UserAgent chỉ có Transport
       if (config.transportOnly) {
         await this._createTransportOnlyUserAgent(config);
       } else {
-        // Nếu không có sdpHandlerFactory, không thể khởi tạo
         if (!this.sdpHandlerFactory) {
           if (!this.clientManager) {
             throw new Error(
@@ -143,9 +130,7 @@ export class SipManager {
         // Tạo User Agent với SessionDescriptionHandlerFactory
         this.userAgent = new UserAgent({
           uri: uri,
-          authorizationUsername:
-            config.authorizationUsername ||
-            config.uri.split(":")[1].split("@")[0],
+          authorizationUsername: config.authorizationUsername || uri.user,
           authorizationPassword: config.password,
           displayName: config.displayName,
           transportOptions: {
@@ -193,8 +178,7 @@ export class SipManager {
 
     this.userAgent = new UserAgent({
       uri: uri,
-      authorizationUsername:
-        config.authorizationUsername || config.uri.split(":")[1].split("@")[0],
+      authorizationUsername: config.authorizationUsername || uri.user,
       authorizationPassword: config.password,
       displayName: config.displayName,
       transportOptions: {

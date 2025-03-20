@@ -6,6 +6,7 @@ import { SipManager } from "./sip-manager";
 import { LoggerFactory } from "../logger";
 import { Message, MessageType, RequestMessage } from "../common/types";
 import { SessionState } from "sip.js";
+import { v7 as uuidv7 } from "uuid";
 
 // Tạo logger cho Worker
 const logger = LoggerFactory.getInstance().getLogger("SipWorker");
@@ -544,7 +545,7 @@ async function handleMakeCall(clientId: string, payload: any): Promise<void> {
     }
 
     // Thông báo trạng thái cuộc gọi: đang tạo
-    const callId = `call_${Date.now()}`;
+    const callId = uuidv7();
 
     clientManager.sendToClient(clientId, {
       type: MessageType.CALL_UPDATE,

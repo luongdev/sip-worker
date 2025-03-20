@@ -10,7 +10,7 @@ type MessageHandlerFn = (message: Message) => void;
 type RequestHandlerFn = (request: RequestMessage) => void;
 
 export class MessageHandler {
-  private messageHandlers: Map<string, MessageHandlerFn[]> = new Map();
+  private readonly messageHandlers: Map<string, MessageHandlerFn[]> = new Map();
 
   constructor(private readonly clientManager: ClientManager) {}
 
