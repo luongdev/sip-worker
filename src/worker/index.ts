@@ -202,19 +202,59 @@ async function handleSipConnect(clientId: string): Promise<void> {
   logger.info(`Processing SIP connect request from client ${clientId}`);
 
   try {
-    // Kết nối đến SIP server
-    const success = await sipManager.connect();
+    // Kiểm tra đã khởi tạo chưa
+    if (!sipManager.isInitialized()) {
+      throw new Error("SIP UserAgent not initialized. Please initialize first.");
+    }
 
-    // Gửi kết quả về client
+    // Gửi thông báo về trạng thái đang kết nối
     clientManager.sendToClient(clientId, {
       type: "SIP_CONNECTION_UPDATE",
       payload: {
-        success,
-        state: success ? "connecting" : "failed",
-        error: success ? undefined : "Failed to connect to SIP server"
+        state: "connecting",
+        message: "Connecting to SIP server..."
       },
       timestamp: Date.now()
     });
+
+    // Lưu timestamp bắt đầu kết nối để lưu trữ trong timeout handler
+    const connectStartTime = Date.now();
+    
+    // Đăng ký callback khi kết nối thành công
+    sipManager.setCallbacks({
+      ...sipManager.getCallbacks(),
+      onConnected: () => {
+        logger.info(`SIP Connected, client ${clientId} requesting connection`);
+        // Gửi thông báo kết nối thành công đến client với đầy đủ thông tin
+        clientManager.sendToClient(clientId, {
+          type: "SIP_CONNECTION_UPDATE",
+          payload: {
+            success: true,
+            state: "connected",
+            message: "Successfully connected to SIP server",
+            connectTime: Date.now() - connectStartTime
+          },
+          timestamp: Date.now()
+        });
+      }
+    });
+
+    // Kết nối đến SIP server
+    const success = await sipManager.connect();
+
+    // Nếu không thành công, gửi thông báo lỗi
+    if (!success) {
+      logger.warn("SIP connection failed or timed out");
+      clientManager.sendToClient(clientId, {
+        type: "SIP_CONNECTION_UPDATE",
+        payload: {
+          success: false,
+          state: "failed",
+          error: "Failed to connect to SIP server"
+        },
+        timestamp: Date.now()
+      });
+    }
   } catch (error) {
     logger.error("Error in SIP connection:", error);
 

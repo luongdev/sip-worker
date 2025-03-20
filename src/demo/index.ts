@@ -239,7 +239,16 @@ initSipButton.addEventListener("click", async () => {
       password,
       wsServers,
       registerExpires: expires,
-      enableLogs: true
+      enableLogs: true,
+      logLevel: 'debug',
+      traceSip: true,
+      connectionTimeout: 30000,
+      iceGatheringTimeout: 5000,
+      autoReconnect: true,
+      stunServers: [
+        'stun:stun.l.google.com:19302',
+        'stun:stun1.l.google.com:19302'
+      ]
     };
     
     log(`Initializing SIP with config: ${JSON.stringify(sipConfig, null, 2)}`);

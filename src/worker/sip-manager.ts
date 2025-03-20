@@ -13,6 +13,7 @@ export interface SipManagerCallbacks {
   onUnregistered?: () => void;
   onRegistrationFailed?: (cause: string) => void;
   onIncomingCall?: (session: any) => void;
+  onTransportStateChange?: (state: string) => void;
 }
 
 export class SipManager {
@@ -20,7 +21,7 @@ export class SipManager {
   private registerer?: Registerer;
   private config?: SipConfig;
   private callbacks: SipManagerCallbacks = {};
-  private isInitialized: boolean = false;
+  private _isInitialized: boolean = false;
   private isConnected: boolean = false;
   private isRegistered: boolean = false;
 
@@ -37,6 +38,13 @@ export class SipManager {
       
       this.config = config;
 
+      // Bật log cho SIP.js nếu enableLogs được bật
+      if (config.enableLogs) {
+        // Đặt log level của SIP.js để xem network logs
+        console.info("Enabling SIP.js logs");
+        (globalThis as any).sipjsLogLevel = "debug";
+      }
+
       // Tạo URI
       const uri = UserAgent.makeURI(config.uri);
       if (!uri) {
@@ -50,7 +58,11 @@ export class SipManager {
         authorizationPassword: config.password,
         displayName: config.displayName,
         transportOptions: {
-          server: Array.isArray(config.wsServers) ? config.wsServers[0] : config.wsServers
+          server: Array.isArray(config.wsServers) ? config.wsServers[0] : config.wsServers,
+          // Thêm cấu hình để bật log cho transport
+          traceSip: true,
+          // Thêm timeout dài hơn
+          connectionTimeout: 20000
         },
         sessionDescriptionHandlerFactoryOptions: {
           iceGatheringTimeout: config.iceGatheringTimeout || 5000,
@@ -63,13 +75,53 @@ export class SipManager {
         }
       };
 
+      // Kích hoạt SIP.js logs bên ngoài cấu hình chính
+      if (config.enableLogs) {
+        try {
+          // @ts-ignore - Custom log configuration
+          userAgentOptions.logConfiguration = {
+            builtinEnabled: true,
+            level: 'debug',
+            connector: (level: string, category: string, label: string, content: string) => {
+              const prefix = label ? `[${label}] ` : '';
+              switch (level) {
+                case 'debug':
+                  logger.debug(`SIP ${category}: ${prefix}${content}`);
+                  break;
+                case 'log':
+                  logger.info(`SIP ${category}: ${prefix}${content}`);
+                  break;
+                case 'warn':
+                  logger.warn(`SIP ${category}: ${prefix}${content}`);
+                  break;
+                case 'error':
+                  logger.error(`SIP ${category}: ${prefix}${content}`);
+                  break;
+                default:
+                  logger.info(`SIP ${category}: ${prefix}${content}`);
+                  break;
+              }
+            }
+          };
+        } catch (error) {
+          logger.warn("Could not set SIP.js custom logger:", error);
+        }
+      }
+
+      logger.info("Creating UserAgent with options:", JSON.stringify({
+        uri: uri.toString(),
+        transportServer: userAgentOptions.transportOptions?.server,
+        authUsername: userAgentOptions.authorizationUsername,
+        iceServers: userAgentOptions.sessionDescriptionHandlerFactoryOptions?.peerConnectionConfiguration?.iceServers
+      }, null, 2));
+
       // Tạo UserAgent
       this.userAgent = new UserAgent(userAgentOptions);
 
       // Thiết lập các sự kiện
       this._setupUserAgentListeners();
 
-      this.isInitialized = true;
+      this._isInitialized = true;
       logger.info("SIP UserAgent initialized successfully");
       return true;
     } catch (error) {
@@ -82,7 +134,7 @@ export class SipManager {
    * Kết nối với SIP server
    */
   async connect(): Promise<boolean> {
-    if (!this.userAgent || !this.isInitialized) {
+    if (!this.userAgent || !this.isInitialized()) {
       logger.error("Cannot connect: UserAgent not initialized");
       return false;
     }
@@ -90,11 +142,62 @@ export class SipManager {
     try {
       logger.info("Connecting to SIP server...");
       
-      // Bắt đầu UserAgent để kết nối với SIP server
-      await this.userAgent.start();
+      // Gọi callback onConnecting nếu có
+      if (this.callbacks.onConnecting) {
+        this.callbacks.onConnecting();
+      }
       
-      logger.info("Connected to SIP server successfully");
-      return true;
+      // Bắt đầu UserAgent để kết nối với SIP server
+      logger.debug("Starting UserAgent...");
+      
+      // Thiết lập một biến flag để theo dõi kết nối thành công
+      let connectionResolved = false;
+      
+      // Tạo một temporary callback cho transport.onConnect
+      const originalOnConnect = this.userAgent.transport.onConnect;
+      
+      // Đặt timeout cho kết nối
+      const connectionTimeout = this.config?.connectionTimeout || 20000;
+      
+      // Trả về kết quả dựa trên Promise - đợi kết nối hoặc timeout
+      const connectionPromise = new Promise<boolean>((resolve) => {
+        // Override onConnect tạm thời
+        this.userAgent!.transport.onConnect = () => {
+          if (!connectionResolved) {
+            connectionResolved = true;
+            // Gọi callback gốc nếu có
+            if (originalOnConnect) {
+              originalOnConnect.call(this.userAgent!.transport);
+            }
+            this.isConnected = true;
+            logger.info("SIP transport connected");
+            if (this.callbacks.onConnected) {
+              this.callbacks.onConnected();
+            }
+            resolve(true);
+          }
+        };
+        
+        // Đặt timeout
+        setTimeout(() => {
+          if (!connectionResolved) {
+            connectionResolved = true;
+            logger.error(`Connection timeout after ${connectionTimeout}ms`);
+            
+            // Khôi phục callback gốc
+            this.userAgent!.transport.onConnect = originalOnConnect;
+            
+            resolve(false);
+          }
+        }, connectionTimeout);
+      });
+      
+      // Bắt đầu UserAgent
+      await this.userAgent.start();
+      logger.debug("UserAgent started, waiting for transport connection");
+      
+      // Đợi kết nối thành công hoặc timeout
+      return await connectionPromise;
     } catch (error) {
       logger.error("Error connecting to SIP server:", error);
       return false;
@@ -194,6 +297,13 @@ export class SipManager {
   }
 
   /**
+   * Lấy các callbacks hiện tại
+   */
+  getCallbacks(): SipManagerCallbacks {
+    return this.callbacks;
+  }
+
+  /**
    * Cài đặt các listeners cho UserAgent
    */
   private _setupUserAgentListeners(): void {
@@ -202,16 +312,46 @@ export class SipManager {
     // Xử lý các sự kiện transport
     this.userAgent.transport.onConnect = () => {
       this.isConnected = true;
-      logger.info("SIP transport connected");
+      logger.info("SIP transport connected successfully");
+      logger.debug("Transport connected, địa chỉ máy chủ: " + 
+        // @ts-ignore - server property exists but not in type definition
+        this.userAgent?.transport?.server);
       if (this.callbacks.onConnected) this.callbacks.onConnected();
     };
 
     this.userAgent.transport.onDisconnect = () => {
+      const wasConnected = this.isConnected;
       this.isConnected = false;
       this.isRegistered = false;
       logger.info("SIP transport disconnected");
+      logger.debug("Transport disconnected, trạng thái trước đó: " + (wasConnected ? "connected" : "disconnected"));
       if (this.callbacks.onDisconnected) this.callbacks.onDisconnected();
+      
+      // Thử kết nối lại nếu bị mất kết nối đột ngột
+      if (wasConnected && this.config?.autoReconnect) {
+        logger.info("Attempting to reconnect...");
+        // Thử kết nối lại sau 5 giây
+        setTimeout(() => {
+          if (this.userAgent && !this.isConnected) {
+            logger.debug("Đang thử kết nối lại sau 5 giây...");
+            this.userAgent.start().catch(err => {
+              logger.error("Reconnection failed:", err);
+            });
+          }
+        }, 5000);
+      }
     };
+    
+    // Xử lý sự kiện trạng thái transport khi thay đổi
+    this.userAgent.transport.stateChange.addListener((state) => {
+      logger.info(`SIP transport state changed to: ${state}`);
+      logger.debug(`Chi tiết trạng thái transport: ${state}, isConnected=${this.isConnected}`);
+      
+      // Thông báo cho client về trạng thái kết nối
+      if (this.callbacks.onTransportStateChange) {
+        this.callbacks.onTransportStateChange(state);
+      }
+    });
 
     // Xử lý cuộc gọi đến
     this.userAgent.delegate = {
@@ -253,7 +393,7 @@ export class SipManager {
    * Lấy trạng thái đăng ký hiện tại
    */
   getRegistrationState(): string {
-    if (!this.isInitialized) return "not_initialized";
+    if (!this.isInitialized()) return "not_initialized";
     if (!this.isConnected) return "not_connected";
     if (this.isRegistered) return "registered";
     return "not_registered";
@@ -263,6 +403,13 @@ export class SipManager {
    * Kiểm tra xem đã kết nối và đăng ký thành công chưa
    */
   isReady(): boolean {
-    return this.isInitialized && this.isConnected && this.isRegistered;
+    return this.isInitialized() && this.isConnected && this.isRegistered;
+  }
+
+  /**
+   * Kiểm tra xem đã khởi tạo thành công chưa
+   */
+  isInitialized(): boolean {
+    return this._isInitialized;
   }
 } 

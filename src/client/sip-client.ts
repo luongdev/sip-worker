@@ -1,9 +1,10 @@
 import {
   Message,
   InitializeResult,
-  ResponseMessage
+  ResponseMessage,
+  SipConfig
 } from "../common/types";
-import { ISipClient, SipClientOptions, ClientMessage, SipConfig } from "./types";
+import { ISipClient, SipClientOptions, ClientMessage } from "./types";
 import { LoggerFactory } from "../logger";
 
 // Tạo logger cho SipClient
@@ -263,18 +264,21 @@ export class SipClient implements ISipClient {
       
       const requestId = `sip_connect_${Date.now()}`;
       
+      // Tăng timeout lên 20 giây vì kết nối SIP có thể mất nhiều thời gian
+      const connectTimeout = 20000; // 20 seconds
+      
       // Thiết lập timeout
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error("SIP connection timed out"));
-      }, this.options.connectTimeout || 5000);
+      }, connectTimeout);
       
       // Lưu promise
       this.pendingRequests.set(requestId, {
         resolve: (result: any) => {
           clearTimeout(timeoutId);
-          this.sipConnected = result.success;
-          resolve(result.success);
+          this.sipConnected = result.success || result.state === "connected";
+          resolve(this.sipConnected);
         },
         reject: (error: Error) => {
           clearTimeout(timeoutId);
@@ -427,14 +431,18 @@ export class SipClient implements ISipClient {
         
       case "SIP_INIT_RESULT":
         // Xử lý kết quả khởi tạo SIP
-        const sipInitPending = this.pendingRequests.get(`sip_init_${message.timestamp}`);
-        if (sipInitPending) {
-          if (message.payload?.success) {
-            sipInitPending.resolve(message.payload);
-          } else {
-            sipInitPending.reject(new Error(message.payload?.error || "SIP initialization failed"));
+        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_init_"
+        for (const [key, pending] of this.pendingRequests.entries()) {
+          if (key.startsWith('sip_init_')) {
+            logger.debug(`Found pending SIP init request: ${key}`);
+            if (message.payload?.success) {
+              pending.resolve(message.payload);
+            } else {
+              pending.reject(new Error(message.payload?.error || "SIP initialization failed"));
+            }
+            this.pendingRequests.delete(key);
+            break;
           }
-          this.pendingRequests.delete(`sip_init_${message.timestamp}`);
         }
         
         // Emit event
@@ -443,16 +451,35 @@ export class SipClient implements ISipClient {
         
       case "SIP_CONNECTION_UPDATE":
         // Xử lý kết quả kết nối SIP
-        const sipConnectPending = this.pendingRequests.get(`sip_connect_${message.timestamp}`);
-        if (sipConnectPending) {
-          if (message.payload?.state === "connected" || message.payload?.success) {
-            this.sipConnected = true;
-            sipConnectPending.resolve(message.payload);
-          } else if (message.payload?.state === "failed" || message.payload?.error) {
-            this.sipConnected = false;
-            sipConnectPending.reject(new Error(message.payload?.error || "SIP connection failed"));
+        logger.debug(`Nhận được SIP_CONNECTION_UPDATE với payload: ${JSON.stringify(message.payload)}`);
+        
+        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_connect_"
+        for (const [key, pending] of this.pendingRequests.entries()) {
+          if (key.startsWith('sip_connect_')) {
+            logger.debug(`Found pending SIP connect request: ${key}`);
+            
+            // Chỉ resolve nếu là trạng thái "connected" hoặc có success=true
+            if (message.payload?.state === "connected" || message.payload?.success === true) {
+              logger.debug(`Kết nối SIP thành công, giải quyết promise`);
+              this.sipConnected = true;
+              pending.resolve(message.payload);
+              this.pendingRequests.delete(key);
+              break;
+            } 
+            // Reject nếu là trạng thái "failed" hoặc có lỗi
+            else if (message.payload?.state === "failed" || message.payload?.error) {
+              logger.debug(`Kết nối SIP thất bại, từ chối promise`);
+              this.sipConnected = false;
+              pending.reject(new Error(message.payload?.error || "SIP connection failed"));
+              this.pendingRequests.delete(key);
+              break;
+            }
+            // Nếu là trạng thái "connecting", không làm gì cả, chờ tin nhắn tiếp theo
+            else if (message.payload?.state === "connecting") {
+              logger.debug(`Đang kết nối SIP, chờ tin nhắn tiếp theo`);
+              // KHÔNG xóa pending request và KHÔNG resolve/reject
+            }
           }
-          this.pendingRequests.delete(`sip_connect_${message.timestamp}`);
         }
         
         // Emit event
@@ -461,16 +488,20 @@ export class SipClient implements ISipClient {
         
       case "SIP_REGISTRATION_UPDATE":
         // Xử lý kết quả đăng ký SIP
-        const sipRegisterPending = this.pendingRequests.get(`sip_register_${message.timestamp}`);
-        if (sipRegisterPending) {
-          if (message.payload?.state === "registered" || message.payload?.success) {
-            this.sipRegistered = true;
-            sipRegisterPending.resolve(message.payload);
-          } else if (message.payload?.state === "failed" || message.payload?.error) {
-            this.sipRegistered = false;
-            sipRegisterPending.reject(new Error(message.payload?.error || "SIP registration failed"));
+        // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_register_"
+        for (const [key, pending] of this.pendingRequests.entries()) {
+          if (key.startsWith('sip_register_')) {
+            logger.debug(`Found pending SIP register request: ${key}`);
+            if (message.payload?.state === "registered" || message.payload?.success) {
+              this.sipRegistered = true;
+              pending.resolve(message.payload);
+            } else if (message.payload?.state === "failed" || message.payload?.error) {
+              this.sipRegistered = false;
+              pending.reject(new Error(message.payload?.error || "SIP registration failed"));
+            }
+            this.pendingRequests.delete(key);
+            break;
           }
-          this.pendingRequests.delete(`sip_register_${message.timestamp}`);
         }
         
         // Emit event

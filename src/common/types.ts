@@ -67,6 +67,11 @@ export interface SipConfig {
   autoRegister?: boolean;
   
   /**
+   * Tự động kết nối lại khi mất kết nối
+   */
+  autoReconnect?: boolean;
+  
+  /**
    * Thời gian hết hạn của session timers
    */
   sessionTimersExpires?: number;
@@ -75,6 +80,16 @@ export interface SipConfig {
    * Thời gian chờ ICE gathering (ms)
    */
   iceGatheringTimeout?: number;
+  
+  /**
+   * Thời gian chờ kết nối (ms)
+   */
+  connectionTimeout?: number;
+  
+  /**
+   * Bật trace SIP traffic
+   */
+  traceSip?: boolean;
   
   /**
    * Danh sách máy chủ STUN
@@ -104,6 +119,11 @@ export interface SipConfig {
    * Logs bật/tắt
    */
   enableLogs?: boolean;
+  
+  /**
+   * Log level (debug, log, warn, error)
+   */
+  logLevel?: 'debug' | 'log' | 'warn' | 'error';
 }
 
 // Interface cơ bản cho tin nhắn
