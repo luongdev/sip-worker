@@ -1,24 +1,60 @@
 import { ClientManager } from "./client-manager";
 import { LoggerFactory } from "../logger";
-import { RequestMessage } from "../common/types";
+import { Message, MessageType, RequestMessage } from "../common/types";
 
 // Tạo logger cho MessageHandler
 const logger = LoggerFactory.getInstance().getLogger("MessageHandler");
 
+// Định nghĩa kiểu cho message handlers
+type MessageHandlerFn = (message: Message) => void;
+type RequestHandlerFn = (request: RequestMessage) => void;
+
 export class MessageHandler {
+  private messageHandlers: Map<string, MessageHandlerFn[]> = new Map();
+
   constructor(private readonly clientManager: ClientManager) {}
+
+  // Thêm handler cho một loại message cụ thể
+  addHandler(messageType: MessageType, handler: MessageHandlerFn): void {
+    const typeKey = messageType.toString();
+    if (!this.messageHandlers.has(typeKey)) {
+      this.messageHandlers.set(typeKey, []);
+    }
+    this.messageHandlers.get(typeKey)?.push(handler);
+    logger.debug(`Added handler for message type: ${messageType}`);
+  }
+
+  // Xử lý message dựa vào type
+  handleMessage(message: Message): void {
+    const { type } = message;
+    logger.debug(`Handling message of type: ${type}`);
+
+    const typeKey = type.toString();
+    const handlers = this.messageHandlers.get(typeKey);
+    if (handlers && handlers.length > 0) {
+      handlers.forEach((handler) => {
+        try {
+          handler(message);
+        } catch (error) {
+          logger.error(`Error in handler for message type ${type}:`, error);
+        }
+      });
+    } else {
+      logger.warn(`No handlers registered for message type: ${type}`);
+    }
+  }
 
   handleClientInit(clientId: string, port: MessagePort): void {
     this.clientManager.registerClient(clientId, port);
 
     this.clientManager.sendToClient(clientId, {
-      type: "STATE_UPDATE",
+      type: MessageType.STATE_UPDATE,
       payload: {
         hasActiveCall: false,
         activeCall: null,
-        registration: { state: "none" }
+        registration: { state: "none" },
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
 
     // Thông báo số lượng client đã kết nối
@@ -30,64 +66,56 @@ export class MessageHandler {
 
     // Thông báo cho các client khác về việc ngắt kết nối
     this.clientManager.broadcastToAllClients({
-      type: "CLIENT_DISCONNECTED",
+      type: MessageType.CLIENT_DISCONNECTED,
       payload: {
         clientId,
-        totalClients: this.clientManager.getClientCount()
+        totalClients: this.clientManager.getClientCount(),
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
   }
 
-  handleRequest(clientId: string, request: RequestMessage): void {
-    logger.info(`Received request from client ${clientId}: ${request.action}`);
-    const { requestId, action, payload } = request;
+  handleRequest(request: RequestMessage): void {
+    const clientId = request.clientId as string;
+    logger.info(`Received request from client ${clientId}: ${request.type}`);
 
-    try {
-      let responseData;
-      let success = true;
-
-      switch (action) {
-        case 'getConnectedClients':
-          responseData = {
-            clients: this.clientManager.getAllClientIds(),
-            count: this.clientManager.getClientCount()
-          };
-          break;
-        
-        case 'echo':
-          responseData = payload;
-          break;
-        
-        // Thêm các actions khác ở đây
-        
-        default:
-          success = false;
-          this.clientManager.sendErrorResponse(
-            clientId, 
-            requestId, 
-            `Unknown action: ${action}`
+    // Xử lý các loại requests
+    const typeKey = request.type.toString();
+    const handlers = this.messageHandlers.get(typeKey);
+    if (handlers && handlers.length > 0) {
+      handlers.forEach((handler) => {
+        try {
+          handler(request);
+        } catch (error) {
+          logger.error(
+            `Error in handler for request type ${request.type}:`,
+            error
           );
-          return;
-      }
-
-      this.clientManager.sendResponse(clientId, requestId, responseData, success);
-    } catch (error) {
-      logger.error(`Error handling request ${action}:`, error);
-      // Chuyển đổi error sang string để đảm bảo kiểu
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.clientManager.sendErrorResponse(clientId, requestId, errorMessage);
+          this.clientManager.sendErrorResponse(
+            clientId,
+            request.requestId,
+            error instanceof Error ? error.message : String(error)
+          );
+        }
+      });
+    } else {
+      logger.warn(`No handlers registered for request type: ${request.type}`);
+      this.clientManager.sendErrorResponse(
+        clientId,
+        request.requestId,
+        `Không có handler cho request type: ${request.type}`
+      );
     }
   }
 
   private notifyClientsAboutConnection(clientId: string): void {
     this.clientManager.broadcastToAllClients({
-      type: "CLIENT_CONNECTED",
+      type: MessageType.CLIENT_CONNECTED,
       payload: {
         clientId,
-        totalClients: this.clientManager.getClientCount()
+        totalClients: this.clientManager.getClientCount(),
       },
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
   }
-} 
+}

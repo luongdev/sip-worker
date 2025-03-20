@@ -35,9 +35,11 @@ export interface ISipClient {
   registerSip(): Promise<boolean>;
 
   // Quản lý cuộc gọi
-  makeCall(target: string, options?: CallOptions): boolean;
-  answerCall(options?: CallOptions): boolean;
-  endCall(): boolean;
+  makeCall(target: string, options?: CallOptions): Promise<any>;
+  hangupCall(callId: string): Promise<any>;
+  answerCall(callId: string, options?: CallOptions): Promise<any>;
+  sendDtmf(callId: string, tones: string): Promise<any>;
+  setMuted(callId: string, muted: boolean): Promise<any>;
 
   // Yêu cầu/Phản hồi
   request<T = any>(action: string, payload?: any, timeout?: number): Promise<T>;

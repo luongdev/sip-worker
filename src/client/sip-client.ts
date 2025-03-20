@@ -2,7 +2,8 @@ import {
   Message,
   InitializeResult,
   ResponseMessage,
-  SipConfig
+  SipConfig,
+  MessageType,
 } from "../common/types";
 import { ISipClient, SipClientOptions, ClientMessage } from "./types";
 import { LoggerFactory } from "../logger";
@@ -16,24 +17,27 @@ export const DefaultClientOptions: SipClientOptions = {
   pingTimeout: 3000,
   autoReconnect: true,
   reconnectInterval: 5000,
-  maxReconnectAttempts: 3
+  maxReconnectAttempts: 3,
 };
 
 export class SipClient implements ISipClient {
   private worker?: SharedWorker;
   private port?: MessagePort;
   private _eventHandlers: Map<string, Set<Function>> = new Map();
-  
+
   private readonly clientId: string;
   private readonly options: SipClientOptions;
   private connected: boolean = false;
-  private pendingRequests: Map<string, { 
-    resolve: Function, 
-    reject: Function, 
-    timeoutId?: number 
-  }> = new Map();
+  private pendingRequests: Map<
+    string,
+    {
+      resolve: Function;
+      reject: Function;
+      timeoutId?: number;
+    }
+  > = new Map();
   private requestCounter: number = 0;
-  
+
   // SIP state
   private sipInitialized: boolean = false;
   private sipConnected: boolean = false;
@@ -65,7 +69,7 @@ export class SipClient implements ISipClient {
   private emitEvent(event: string, ...args: any[]): void {
     const handlers = this._eventHandlers.get(event);
     if (handlers) {
-      handlers.forEach(handler => {
+      handlers.forEach((handler) => {
         try {
           handler(...args);
         } catch (error) {
@@ -80,13 +84,13 @@ export class SipClient implements ISipClient {
     return new Promise((resolve, reject) => {
       try {
         logger.info("Initializing SIP Client...");
-        
+
         // Tạo SharedWorker
         this.worker = new SharedWorker(
           new URL("../worker/index.ts", import.meta.url),
           {
             type: "module",
-            name: "sip-worker"
+            name: "sip-worker",
           }
         );
 
@@ -105,7 +109,7 @@ export class SipClient implements ISipClient {
         this.port.postMessage({
           type: "CLIENT_CONNECTED",
           clientId: this.clientId,
-          timestamp: Date.now()
+          timestamp: Date.now(),
         });
 
         // Lưu promise để resolve sau khi STATE_UPDATE được nhận
@@ -120,7 +124,7 @@ export class SipClient implements ISipClient {
             this.connected = false;
             reject(error);
           },
-          timeoutId: connectionTimeout as unknown as number
+          timeoutId: connectionTimeout as unknown as number,
         });
       } catch (error) {
         logger.error("Error initializing client:", error);
@@ -147,7 +151,7 @@ export class SipClient implements ISipClient {
       const messageWithClientId = {
         ...message,
         clientId: this.clientId,
-        timestamp: message.timestamp || Date.now()
+        timestamp: message.timestamp || Date.now(),
       };
 
       this.port.postMessage(messageWithClientId);
@@ -159,15 +163,20 @@ export class SipClient implements ISipClient {
   }
 
   // Request/Response
-  request<T = any>(action: string, payload?: any, timeout: number = 5000): Promise<T> {
+  request<T = any>(
+    action: string,
+    payload?: any,
+    timeout: number = 5000
+  ): Promise<T> {
     return new Promise((resolve, reject) => {
       if (!this.connected || !this.port) {
         reject(new Error("Not connected to worker"));
         return;
       }
 
-      const requestId = `req_${this.clientId}_${Date.now()}_${++this.requestCounter}`;
-      
+      const requestId = `req_${this.clientId}_${Date.now()}_${++this
+        .requestCounter}`;
+
       // Thiết lập timeout
       const timeoutId = setTimeout(() => {
         const pending = this.pendingRequests.get(requestId);
@@ -181,15 +190,15 @@ export class SipClient implements ISipClient {
       this.pendingRequests.set(requestId, {
         resolve,
         reject,
-        timeoutId: timeoutId as unknown as number
+        timeoutId: timeoutId as unknown as number,
       });
 
       // Gửi request
       this.sendMessage({
-        type: "REQUEST",
+        type: MessageType.REQUEST,
         requestId,
         action,
-        payload
+        payload,
       });
     });
   }
@@ -204,7 +213,7 @@ export class SipClient implements ISipClient {
   }
 
   // SIP Methods
-  
+
   /**
    * Khởi tạo SIP với cấu hình
    * @param config Cấu hình SIP
@@ -215,38 +224,55 @@ export class SipClient implements ISipClient {
         reject(new Error("Not connected to worker"));
         return;
       }
-      
+
       const requestId = `sip_init_${Date.now()}`;
-      
+
+      // Tăng timeout lên 30 giây vì khởi tạo SIP có thể mất nhiều thời gian
+      const sipInitTimeout = 30000; // 30 seconds
+
+      logger.debug(
+        `Setting up SIP initialization with timeout ${sipInitTimeout}ms`
+      );
+
       // Thiết lập timeout
       const timeoutId = setTimeout(() => {
+        logger.error(`SIP initialization timed out after ${sipInitTimeout}ms`);
         this.pendingRequests.delete(requestId);
         reject(new Error("SIP initialization timed out"));
-      }, this.options.connectTimeout || 5000);
-      
+      }, sipInitTimeout);
+
       // Lưu promise
       this.pendingRequests.set(requestId, {
         resolve: (result: any) => {
+          logger.debug(
+            `SIP initialization successful: ${JSON.stringify(result)}`
+          );
           clearTimeout(timeoutId);
           this.sipInitialized = result.success;
           resolve(result.success);
         },
         reject: (error: Error) => {
+          logger.error(`SIP initialization failed: ${error.message}`);
           clearTimeout(timeoutId);
           this.sipInitialized = false;
           reject(error);
         },
-        timeoutId: timeoutId as unknown as number
+        timeoutId: timeoutId as unknown as number,
       });
-      
+
+      logger.debug(
+        `Sending REQUEST_SIP_INIT message with requestId: ${requestId}`
+      );
+
       // Gửi tin nhắn khởi tạo SIP
       this.sendMessage({
-        type: "REQUEST_SIP_INIT",
-        payload: config
+        type: MessageType.REQUEST_SIP_INIT,
+        requestId, // Thêm requestId vào message
+        payload: config,
       });
     });
   }
-  
+
   /**
    * Kết nối với SIP server
    */
@@ -256,23 +282,23 @@ export class SipClient implements ISipClient {
         reject(new Error("Not connected to worker"));
         return;
       }
-      
+
       if (!this.sipInitialized) {
         reject(new Error("SIP not initialized"));
         return;
       }
-      
+
       const requestId = `sip_connect_${Date.now()}`;
-      
+
       // Tăng timeout lên 20 giây vì kết nối SIP có thể mất nhiều thời gian
       const connectTimeout = 20000; // 20 seconds
-      
+
       // Thiết lập timeout
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error("SIP connection timed out"));
       }, connectTimeout);
-      
+
       // Lưu promise
       this.pendingRequests.set(requestId, {
         resolve: (result: any) => {
@@ -285,16 +311,16 @@ export class SipClient implements ISipClient {
           this.sipConnected = false;
           reject(error);
         },
-        timeoutId: timeoutId as unknown as number
+        timeoutId: timeoutId as unknown as number,
       });
-      
+
       // Gửi tin nhắn kết nối SIP
       this.sendMessage({
-        type: "REQUEST_CONNECT"
+        type: MessageType.REQUEST_CONNECT,
       });
     });
   }
-  
+
   /**
    * Đăng ký với SIP server
    */
@@ -304,20 +330,20 @@ export class SipClient implements ISipClient {
         reject(new Error("Not connected to worker"));
         return;
       }
-      
+
       if (!this.sipConnected) {
         reject(new Error("SIP not connected"));
         return;
       }
-      
+
       const requestId = `sip_register_${Date.now()}`;
-      
+
       // Thiết lập timeout
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(new Error("SIP registration timed out"));
       }, this.options.connectTimeout || 5000);
-      
+
       // Lưu promise
       this.pendingRequests.set(requestId, {
         resolve: (result: any) => {
@@ -330,39 +356,122 @@ export class SipClient implements ISipClient {
           this.sipRegistered = false;
           reject(error);
         },
-        timeoutId: timeoutId as unknown as number
+        timeoutId: timeoutId as unknown as number,
       });
-      
+
       // Gửi tin nhắn đăng ký SIP
       this.sendMessage({
-        type: "REQUEST_REGISTER"
+        type: MessageType.REQUEST_REGISTER,
       });
     });
   }
 
-  // Quản lý cuộc gọi
-  makeCall(target: string, options?: any): boolean {
-    return this.sendMessage({
-      type: "MAKE_CALL",
-      payload: {
-        target,
-        options
-      }
+  /**
+   * Melakukan panggilan SIP
+   * @param target URI tujuan panggilan
+   * @param options Opsi tambahan untuk panggilan
+   * @returns True jika request berhasil dikirim
+   */
+  makeCall(target: string, options?: any): Promise<any> {
+    if (!this.isConnected()) {
+      return Promise.reject(new Error("Not connected to worker"));
+    }
+
+    if (!this.sipInitialized || !this.sipConnected || !this.sipRegistered) {
+      return Promise.reject(
+        new Error(
+          "SIP not ready. Please initialize, connect, and register first"
+        )
+      );
+    }
+
+    logger.info(`Making call to ${target}`);
+
+    return this.request("makeCall", {
+      target,
+      options,
     });
   }
 
-  answerCall(options?: any): boolean {
-    return this.sendMessage({
-      type: "ANSWER_CALL",
-      payload: {
-        options
-      }
+  /**
+   * Mengakhiri panggilan
+   * @param callId ID panggilan yang akan diakhiri
+   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
+   */
+  hangupCall(callId: string): Promise<any> {
+    if (!this.isConnected()) {
+      return Promise.reject(new Error("Not connected to worker"));
+    }
+
+    logger.info(`Hanging up call ${callId}`);
+
+    return this.request("hangupCall", {
+      callId,
     });
   }
 
-  endCall(): boolean {
-    return this.sendMessage({
-      type: "END_CALL"
+  /**
+   * Mengirim nada DTMF selama panggilan
+   * @param callId ID panggilan yang aktif
+   * @param tones Nada DTMF untuk dikirim
+   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
+   */
+  sendDtmf(callId: string, tones: string): Promise<any> {
+    if (!this.isConnected()) {
+      return Promise.reject(new Error("Not connected to worker"));
+    }
+
+    logger.info(`Sending DTMF tones ${tones} for call ${callId}`);
+
+    return this.request("sendDtmf", {
+      callId,
+      tones,
+    });
+  }
+
+  /**
+   * Mengatur status mute panggilan
+   * @param callId ID panggilan
+   * @param muted Status mute (true/false)
+   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
+   */
+  setMuted(callId: string, muted: boolean): Promise<any> {
+    if (!this.isConnected()) {
+      return Promise.reject(new Error("Not connected to worker"));
+    }
+
+    logger.info(`Setting muted=${muted} for call ${callId}`);
+
+    return this.request("setMuted", {
+      callId,
+      muted,
+    });
+  }
+
+  /**
+   * Menjawab panggilan masuk
+   * @param callId ID panggilan yang akan dijawab
+   * @param options Opsi tambahan untuk menjawab panggilan
+   * @returns Promise yang diselesaikan saat permintaan berhasil dikirim
+   */
+  answerCall(callId: string, options?: any): Promise<any> {
+    if (!this.isConnected()) {
+      return Promise.reject(new Error("Not connected to worker"));
+    }
+
+    if (!this.sipInitialized || !this.sipConnected || !this.sipRegistered) {
+      return Promise.reject(
+        new Error(
+          "SIP not ready. Please initialize, connect, and register first"
+        )
+      );
+    }
+
+    logger.info(`Answering call ${callId}`);
+
+    return this.request("answerCall", {
+      callId,
+      options,
     });
   }
 
@@ -372,7 +481,7 @@ export class SipClient implements ISipClient {
       try {
         // Thông báo ngắt kết nối đến worker
         this.sendMessage({
-          type: "CLIENT_DISCONNECTED"
+          type: MessageType.CLIENT_DISCONNECTED,
         });
 
         // Đóng các request đang chờ
@@ -400,7 +509,7 @@ export class SipClient implements ISipClient {
   // Xử lý messages từ worker
   private handleWorkerMessage(event: MessageEvent): void {
     const message = event.data as Message;
-    
+
     if (!message || !message.type) {
       logger.error("Received invalid message from worker:", event.data);
       return;
@@ -416,11 +525,11 @@ export class SipClient implements ISipClient {
           initPending.resolve({
             success: true,
             clientId: this.clientId,
-            connectedClients: message.payload?.totalClients || 1
+            connectedClients: message.payload?.totalClients || 1,
           });
           this.pendingRequests.delete("initialize");
         }
-        
+
         // Emit event
         this.emitEvent("stateUpdate", message.payload);
         break;
@@ -428,49 +537,63 @@ export class SipClient implements ISipClient {
       case "RESPONSE":
         this.handleResponse(message as ResponseMessage);
         break;
-        
+
       case "SIP_INIT_RESULT":
         // Xử lý kết quả khởi tạo SIP
         // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_init_"
         for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith('sip_init_')) {
+          if (key.startsWith("sip_init_")) {
             logger.debug(`Found pending SIP init request: ${key}`);
             if (message.payload?.success) {
               pending.resolve(message.payload);
             } else {
-              pending.reject(new Error(message.payload?.error || "SIP initialization failed"));
+              pending.reject(
+                new Error(message.payload?.error || "SIP initialization failed")
+              );
             }
             this.pendingRequests.delete(key);
             break;
           }
         }
-        
+
         // Emit event
         this.emitEvent("sipInitResult", message.payload);
         break;
-        
+
       case "SIP_CONNECTION_UPDATE":
         // Xử lý kết quả kết nối SIP
-        logger.debug(`Nhận được SIP_CONNECTION_UPDATE với payload: ${JSON.stringify(message.payload)}`);
-        
+        logger.debug(
+          `Nhận được SIP_CONNECTION_UPDATE với payload: ${JSON.stringify(
+            message.payload
+          )}`
+        );
+
         // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_connect_"
         for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith('sip_connect_')) {
+          if (key.startsWith("sip_connect_")) {
             logger.debug(`Found pending SIP connect request: ${key}`);
-            
+
             // Chỉ resolve nếu là trạng thái "connected" hoặc có success=true
-            if (message.payload?.state === "connected" || message.payload?.success === true) {
+            if (
+              message.payload?.state === "connected" ||
+              message.payload?.success === true
+            ) {
               logger.debug(`Kết nối SIP thành công, giải quyết promise`);
               this.sipConnected = true;
               pending.resolve(message.payload);
               this.pendingRequests.delete(key);
               break;
-            } 
+            }
             // Reject nếu là trạng thái "failed" hoặc có lỗi
-            else if (message.payload?.state === "failed" || message.payload?.error) {
+            else if (
+              message.payload?.state === "failed" ||
+              message.payload?.error
+            ) {
               logger.debug(`Kết nối SIP thất bại, từ chối promise`);
               this.sipConnected = false;
-              pending.reject(new Error(message.payload?.error || "SIP connection failed"));
+              pending.reject(
+                new Error(message.payload?.error || "SIP connection failed")
+              );
               this.pendingRequests.delete(key);
               break;
             }
@@ -481,36 +604,44 @@ export class SipClient implements ISipClient {
             }
           }
         }
-        
+
         // Emit event
         this.emitEvent("sipConnectionUpdate", message.payload);
         break;
-        
+
       case "SIP_REGISTRATION_UPDATE":
         // Xử lý kết quả đăng ký SIP
         // Kiểm tra tất cả các pending requests có key bắt đầu bằng "sip_register_"
         for (const [key, pending] of this.pendingRequests.entries()) {
-          if (key.startsWith('sip_register_')) {
+          if (key.startsWith("sip_register_")) {
             logger.debug(`Found pending SIP register request: ${key}`);
-            if (message.payload?.state === "registered" || message.payload?.success) {
+            if (
+              message.payload?.state === "registered" ||
+              message.payload?.success
+            ) {
               this.sipRegistered = true;
               pending.resolve(message.payload);
-            } else if (message.payload?.state === "failed" || message.payload?.error) {
+            } else if (
+              message.payload?.state === "failed" ||
+              message.payload?.error
+            ) {
               this.sipRegistered = false;
-              pending.reject(new Error(message.payload?.error || "SIP registration failed"));
+              pending.reject(
+                new Error(message.payload?.error || "SIP registration failed")
+              );
             }
             this.pendingRequests.delete(key);
             break;
           }
         }
-        
+
         // Emit event
         this.emitEvent("sipRegistrationUpdate", message.payload);
         break;
 
       default:
-        // Emit event cho các loại tin nhắn khác
-        this.emitEvent(message.type.toLowerCase(), message.payload);
+        // Emit event using the message type as event name
+        this.emitEvent("message", message);
         break;
     }
   }
@@ -520,15 +651,15 @@ export class SipClient implements ISipClient {
       logger.error("Received invalid response format:", response);
       return;
     }
-    
+
     const { requestId, success, data, error } = response.payload;
-    
+
     // Kiểm tra requestId hợp lệ
     if (!requestId) {
       logger.error("Response missing requestId:", response);
       return;
     }
-    
+
     const pending = this.pendingRequests.get(requestId);
 
     if (pending) {
@@ -547,4 +678,4 @@ export class SipClient implements ISipClient {
       logger.warn(`Received response for unknown request: ${requestId}`);
     }
   }
-} 
+}

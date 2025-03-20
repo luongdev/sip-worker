@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SIP Worker Demo</title>
+    <link rel="stylesheet" href="styles.css">
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -95,68 +96,111 @@
     </style>
   </head>
   <body>
-    <h1>SIP Worker Demo</h1>
-    
     <div class="container">
-      <div class="panel">
+      <h1>SIP Worker Demo</h1>
+      
+      <!-- Worker connection section -->
+      <section class="card">
         <h2>Worker Connection</h2>
-        <div>
-          Status: <div id="connectionStatus" class="status disconnected"></div>
+        <div class="status-row">
+          <div class="status-label">Status:</div>
+          <div id="connectionStatus" class="status disconnected"></div>
           <span id="statusText">Disconnected</span>
+          <div class="status-info">
+            <span>Clients: </span>
+            <span id="clientCount">0</span>
+          </div>
         </div>
-        <div>Connected clients: <span id="clientCount">0</span></div>
-        <div class="action-buttons">
-          <button id="connectWorker">Connect to Worker</button>
+        <div class="button-row">
+          <button id="connectWorker">Connect</button>
           <button id="requestWorker" disabled>Request Info</button>
           <button id="disconnectWorker" disabled>Disconnect</button>
         </div>
-      </div>
+      </section>
       
-      <div class="panel">
+      <!-- SIP configuration section -->
+      <section class="card">
         <h2>SIP Configuration</h2>
-        <div class="form-group">
-          <label for="sipUri">SIP URI:</label>
-          <input type="text" id="sipUri" placeholder="sip:username@example.com" value="sip:10000@voiceuat.metechvn.com">
-        </div>
-        <div class="form-group">
-          <label for="sipPassword">Password:</label>
-          <input type="password" id="sipPassword" placeholder="Password" value="Abcd@54321">
-        </div>
-        <div class="form-group">
-          <label for="sipWsServers">WebSocket Servers (one per line):</label>
-          <textarea id="sipWsServers" placeholder="ws://sip-ws.example.com:8088">ws://101.99.20.58:7080</textarea>
-        </div>
-        <div class="form-group">
-          <label for="sipExpires">Register Expires (seconds):</label>
-          <input type="number" id="sipExpires" value="600">
-        </div>
-      </div>
-      
-      <div class="panel">
+        <form id="sipConfigForm" autocomplete="off" onsubmit="return false;">
+          <div class="form-group">
+            <label for="sipUri">SIP URI:</label>
+            <input type="text" id="sipUri" value="sip:10000@voiceuat.metechvn.com">
+          </div>
+          <div class="form-group">
+            <label for="sipPassword">Password:</label>
+            <input type="password" id="sipPassword" value="Abcd@54321">
+          </div>
+          <div class="form-group">
+            <label for="sipWsServers">WebSocket Servers:</label>
+            <textarea id="sipWsServers">ws://101.99.20.58:7080</textarea>
+          </div>
+          <div class="form-group">
+            <label for="sipExpires">Register Expires (seconds):</label>
+            <input type="number" id="sipExpires" value="600">
+          </div>
+        </form>
+      </section>
+
+      <!-- SIP Status section -->
+      <section class="card">
         <h2>SIP Status</h2>
-        <table width="100%">
-          <tr>
-            <td>Initialized:</td>
-            <td><div id="sipInitStatus" class="status disconnected"></div></td>
-            <td><button id="initSip" disabled>Initialize SIP</button></td>
-          </tr>
-          <tr>
-            <td>Connected:</td>
-            <td><div id="sipConnectStatus" class="status disconnected"></div></td>
-            <td><button id="connectSip" disabled>Connect SIP</button></td>
-          </tr>
-          <tr>
-            <td>Registered:</td>
-            <td><div id="sipRegisterStatus" class="status disconnected"></div></td>
-            <td><button id="registerSip" disabled>Register SIP</button></td>
-          </tr>
-        </table>
-      </div>
-    </div>
-    
-    <div class="panel">
-      <h2>Log</h2>
-      <div id="logContainer" class="log-container"></div>
+        <div class="status-row">
+          <div class="status-label">Initialized:</div>
+          <div id="sipInitStatus" class="status disconnected"></div>
+          <button id="initSip" disabled>Initialize SIP</button>
+        </div>
+        <div class="status-row">
+          <div class="status-label">Connected:</div>
+          <div id="sipConnectStatus" class="status disconnected"></div>
+          <button id="connectSip" disabled>Connect</button>
+        </div>
+        <div class="status-row">
+          <div class="status-label">Registered:</div>
+          <div id="sipRegisterStatus" class="status disconnected"></div>
+          <button id="registerSip" disabled>Register</button>
+        </div>
+      </section>
+
+      <!-- Calling section -->
+      <section class="card">
+        <h2>Make a Call</h2>
+        <form id="callForm" autocomplete="off" onsubmit="return false;">
+          <div class="form-group">
+            <label for="targetUri">Call Target:</label>
+            <input type="text" id="targetUri" value="sip:100000@voiceuat.metechvn.com">
+          </div>
+          <div class="call-buttons">
+            <button id="makeCall" disabled>Make Call</button>
+            <button id="hangupCall" disabled>Hang Up</button>
+            <button id="answerCall" disabled>Answer Call</button>
+          </div>
+          <div class="call-status">
+            <p>Call Status: <span id="callStatusText">No active call</span></p>
+            <p>Call Duration: <span id="callDuration">0:00</span></p>
+          </div>
+        </form>
+      </section>
+
+      <!-- Media elements -->
+      <section class="card">
+        <h2>Audio</h2>
+        <div class="audio-controls">
+          <audio id="remoteAudio" autoplay></audio>
+          <form id="dtmfForm" autocomplete="off" onsubmit="return false;">
+            <div class="audio-buttons">
+              <button id="muteAudio" disabled>Mute</button>
+              <button id="sendDtmf" disabled>Send DTMF</button>
+              <input type="text" id="dtmfInput" placeholder="DTMF tones (e.g. 1234#)" disabled>
+            </div>
+          </form>
+        </div>
+      </section>
+      
+      <!-- Log section -->
+      <section class="card">
+        <h2>Log</h2>
+        <div id="logContainer" class="log-container"></div>
+      </section>
     </div>
     
     <script type="module">
