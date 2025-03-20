@@ -28,6 +28,26 @@ export type MessageType =
   | "SIP_REGISTRATION_UPDATE";
 
 /**
+ * Thông tin đăng nhập SIP
+ */
+export interface SipCredentials {
+  /**
+   * Tên người dùng SIP
+   */
+  username: string;
+
+  /**
+   * Mật khẩu
+   */
+  password: string;
+
+  /**
+   * Tên xác thực (nếu khác username)
+   */
+  authorizationName?: string;
+}
+
+/**
  * Cấu hình SIP
  */
 export interface SipConfig {
@@ -35,67 +55,67 @@ export interface SipConfig {
    * URI cho SIP, ví dụ: 'sip:username@domain.com'
    */
   uri: string;
-  
+
   /**
    * Mật khẩu cho tài khoản SIP
    */
   password: string;
-  
+
   /**
    * Tên hiển thị (tùy chọn)
    */
   displayName?: string;
-  
+
   /**
    * Danh sách các máy chủ WebSocket SIP
    */
   wsServers: string | string[];
-  
+
   /**
    * Chuỗi User-Agent (tùy chọn)
    */
   userAgentString?: string;
-  
+
   /**
    * Thời gian hết hạn đăng ký (giây)
    */
   registerExpires?: number;
-  
+
   /**
    * Tự động đăng ký
    */
   autoRegister?: boolean;
-  
+
   /**
    * Tự động kết nối lại khi mất kết nối
    */
   autoReconnect?: boolean;
-  
+
   /**
    * Thời gian hết hạn của session timers
    */
   sessionTimersExpires?: number;
-  
+
   /**
    * Thời gian chờ ICE gathering (ms)
    */
   iceGatheringTimeout?: number;
-  
+
   /**
    * Thời gian chờ kết nối (ms)
    */
   connectionTimeout?: number;
-  
+
   /**
    * Bật trace SIP traffic
    */
   traceSip?: boolean;
-  
+
   /**
    * Danh sách máy chủ STUN
    */
   stunServers?: string[];
-  
+
   /**
    * Danh sách các máy chủ TURN
    */
@@ -104,26 +124,26 @@ export interface SipConfig {
     username?: string;
     password?: string;
   }>;
-  
+
   /**
    * Danh sách các máy chủ outbound proxy (tùy chọn)
    */
   outboundProxy?: string[];
-  
+
   /**
    * Headers bổ sung (tùy chọn)
    */
   extraHeaders?: Record<string, string>;
-  
+
   /**
    * Logs bật/tắt
    */
   enableLogs?: boolean;
-  
+
   /**
    * Log level (debug, log, warn, error)
    */
-  logLevel?: 'debug' | 'log' | 'warn' | 'error';
+  logLevel?: "debug" | "log" | "warn" | "error";
 }
 
 // Interface cơ bản cho tin nhắn
@@ -155,7 +175,7 @@ export interface RequestMessage extends Message {
 
 // Interface cho phản hồi (response)
 export interface ResponseMessage extends Message {
-  type: 'RESPONSE';
+  type: "RESPONSE";
   payload: {
     requestId: string;
     success: boolean;
@@ -174,7 +194,7 @@ export interface CallState {
 // Dữ liệu cuộc gọi
 export interface CallData {
   id: string;
-  state: 'incoming' | 'connecting' | 'connected' | 'ended';
+  state: "incoming" | "connecting" | "connected" | "ended";
   target?: string;
   from?: string;
   displayName?: string;
@@ -185,4 +205,4 @@ export interface CallData {
   initiatedBy?: string;
   answeredBy?: string;
   endReason?: string;
-} 
+}
